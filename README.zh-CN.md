@@ -2,69 +2,92 @@
 
 简体中文 | [English](README.md)
 
-> **EdgeEver：无需服务器、0 费用、开源且原生支持 AI Agent 的自托管『印象笔记』替代品。**
+> **EdgeEver：无需服务器、0 费用、开源且原生支持 AI 的自托管「印象笔记」替代方案。**
 
-EdgeEver 是一个开源、自托管、Cloudflare-native 的现代笔记工作区。它保留经典印象笔记的三栏体验，同时提供清晰的数据模型、REST API、OpenAPI schema 和 MCP endpoint，原生支持 AI Agent 接入。
+EdgeEver 是一款现代化的开源笔记工作区。它为你找回经典印象笔记的三栏高效体验，同时具备完全开放的数据架构与原生 AI Agent 联动能力，让个人知识沉淀更轻量、更自由。
+
 > 💡 **终身免服务器，100% 免费**
-> EdgeEver 采用纯 Serverless（无服务器）架构。自部署时**你不需要购买任何云服务器**，也**不需要折腾复杂的 Docker 或 SSL 证书**。直接运行在 Cloudflare 的免费额度内，个人日常使用 **完全免费，0 费用，0 运维**。
+> EdgeEver 采用纯 Serverless（无服务器）架构。自部署时**无需购买云服务器**，也**无需配置复杂的 Docker 或 SSL 证书**。免费运行于 Cloudflare 配额之内，个人日常使用 **100% 免费，零费用、零运维**。
+
+> ⭐ 如果 EdgeEver 对你有帮助，欢迎点个 Star。你的支持会帮助更多人发现这个项目。
 
 ## 为什么做 EdgeEver
 
-很多长期使用印象笔记的人需要的只是一个可靠、开放、响应足够快的个人知识库。但现在的印象笔记越来越臃肿，商业化和附加功能不断增加，性能和内存占用也越来越难让人满意。
+很多长期使用**印象笔记**的用户，核心需求只是一个**可靠、开放、响应迅速**的个人知识库。然而，当下的主流方案都各有痛点：
 
-更麻烦的是数据开放性：笔记很难直接导出为开放格式，迁移常常依赖可能失效的第三方插件；国内版不原生支持 MCP，国际版价格又不适合很多个人用户。
+* **印象笔记**：功能日益臃肿，商业广告与繁杂附加功能充斥，性能与内存占用居高不下；且数据相对封闭难以导出，免费版限制重重，支持 AI/MCP 的套餐订阅成本高昂。
+* **Obsidian**：功能强大且高度开放，但对于“随时随地随手记”的轻量场景来说偏重；官方同步费用昂贵，第三方同步配置繁琐。
+* **Memos 等轻量笔记**：虽然简单好用，但流式卡片布局与习惯了经典“三栏工作流”的用户有着天然的交互习惯差异。
 
-Memos 等轻量笔记产品更开放，但交互体验和经典印象笔记式三栏工作流仍有明显距离。
-EdgeEver 想填补这个空白：保留熟悉的笔记体验，同时提供开放数据、REST API、MCP 和零成本自托管部署。
+**EdgeEver 恰好填补了这一空白**：在保留你最熟悉的经典三栏布局与流畅排版的同时，赋予数据完全的自由度，原生支持接入 AI Agent，且部署维护零门槛、零费用。
+
+> 💡 **最佳实践推荐：**
+> 用 **EdgeEver** 随时捕捉灵感与备忘，作为知识的“原料库”；当需要结构化整理或创作发布时，既能通过 **MCP** 唤醒 AI 助手智能归纳并同步至 **Obsidian**、**Notion** 或**飞书多维表格**，也能一键将文章精美排版并复制到**微信公众号**直接发布。
 
 ## 在线演示
 
 - Demo 地址：[https://demo.edgeever.org](https://demo.edgeever.org)
 
-公开演示环境会每天自动重置并恢复示例笔记，请不要保存私密内容。
-
-## 部署
-
-### 通过AI Agent 一句话部署
- 
-将下方提示词复制给你的 AI 助手（Claude Code、Codex、Antigravity、Cursor、Trae 等），它会自动完成安装
-
-**建议：** 开始部署前，请先为 AI Agent 配置 GitHub 和 Cloudflare 的 MCP、插件或其他可用集成，以便 Agent 完成仓库 Fork、Cloudflare 资源创建与应用部署。
-
-```text
-请按以下流程操作：
-1. Fork EdgeEver 上游仓库：https://github.com/tianma-if/edgeever
-2. 使用 Fork 后的仓库，将 EdgeEver 安装并部署到 Cloudflare。
-3. 为 Fork 仓库配置从上游仓库同步更新的机制，使其能够定期或按需获取上游仓库的最新代码与产品特性。
-```
-
-Agent 应优先按 [AI Agent Cloudflare Deployment](docs/agent-deploy-cloudflare.md) 执行 
-
-> 常见踩坑：Cloudflare 的 R2、D1 和 Worker 即使使用免费额度，在开通或使用过程中也可能要求绑定一张 Visa 卡。国内用户可以考虑办理招商银行多币种卡，拿到 Visa 卡后绑定到 Cloudflare 账号即可。
-
-### 手动部署
-
-关于手动安装和更新的详细步骤，请参考 [Cloudflare 手动部署指南](docs/manual-deploy.zh-CN.md)。
-
-推荐优先使用自动化辅助命令。如果选择完全手动创建 Cloudflare 资源，必须先在 `.env.local` 中完成 D1 ID、R2 bucket、密码 hash 和 400 天会话期限等配置，再执行 `bun run deploy`。
-
+公开演示环境会在每周一凌晨 1:00（北京时间）自动重置并恢复示例笔记，请不要保存私密内容。
 
 ## 功能
 
-- 零服务器，零运维，终身完全免费：基于 Cloudflare 无服务器架构与免费级配额，短笔记可达 15 万条，200KB 图片约可存放 5 万张，彻底免去云服务器租用和维护成本。
-- 数据完全开放：笔记内容存放在基于标准 SQLite 的 Cloudflare D1 中，可通过 REST API、MCP 和 CLI 按需读取、迁移或导出，不用担心被单一笔记产品绑定。
-- AI Agent 友好：原生支持 MCP，可让 Codex、Claude Code、Antigravity 等工具读取、整理和维护笔记，并可借助 MCP 与 Notion Database、飞书多维表格进行联动。
-- 多端无缝同步且不限设备数：基于自建的 API 个人独享数据，摆脱商业笔记平台对登录设备数量的强制限制（如免费版只允许登录 2 台设备等），支持 PC、平板与手机无缝多端同步。
-- 三栏布局：笔记本树、笔记列表、主编辑区。
-- 无限级嵌套笔记本。
-- 支持富文本编辑。
-- 支持查看笔记历史版本，便于回溯内容变化。
-- 笔记图片上传前支持 Web 端本地压缩，常见截图和大尺寸照片通常可减少约 50%-90% 体积，减少资源占用且不消耗 Cloudflare Images 额度。
-- 多选合并笔记。
-- 多选移动笔记，笔记本支持拖拽排序和调整层级。
-- 已有笔记支持离线编辑草稿和本地同步队列。
-- 单用户登录，密码使用 PBKDF2-SHA256 hash。
-- 支持 Chrome/Edge 网页裁剪 MVP（待上架）：提取当前网页正文或选中内容，保存到用户自己的 EdgeEver 实例。
+- **零服务器、零运维、真正免费**：基于 Cloudflare Serverless 架构，彻底告别服务器租用与运维烦恼。免费配额可轻松容纳 15 万条笔记与 5 万张图片，全球节点带来秒开体验。
+- **数据开放，不设围墙**：基于标准 SQLite 存储，提供 REST API、MCP 与 CLI 接口。数据随时可读可导，不再担心被任何特定平台绑定。
+- **无损 ZIP 打包与无缝迁移**：一键打包导出包含 Markdown、Front Matter、嵌套目录及附件的完整档案，同时保留历史版本与结构化数据，方便在不同实例间完整还原。
+- **原生 AI Agent 智脑联动**：内置 MCP（Model Context Protocol）协议，支持 Claude Code、Codex、Antigravity 等 AI 助手直接读取与整理笔记，也可与 Notion Database、飞书多维表格轻松打通。
+- **多端无缝同步，无设备限制**：自托管数据无商业限制，摆脱免费账号仅限 2 台设备的束缚，在 PC、平板与手机上随心同步。
+- **经典三栏布局与专注模式**：笔记本树、笔记列表与编辑区一目了然；桌面端一键开启专注模式，让思绪尽情铺满屏幕。
+- **无限层级笔记本**：轻松构建清晰的多级目录结构。
+- **微信公众号一键排版与复制**：专为中文创作者设计，支持将笔记一键转换为带行内样式的公众号美化格式，直接复制粘贴至微信公众号后台，告别复杂的第三方排版工具。
+- **优雅的双视图编辑**：桌面端支持在富文本与 Markdown 源码视图之间自由切换。
+- **Mermaid 架构图与流程图渲染**：原生支持 Mermaid 代码块渲染，视图切换时完整保留可编辑源码，让绘制逻辑图表更直观。
+- **笔记历史版本回溯**：自动记录修改历史，随时查阅与还原过往版本。
+- **智能前端图片压缩**：图片上传前在浏览器端静默完成压缩，常见截图与大图精简 50%-90% 体积，加载更迅速、存储更省心。
+- **通用文件附件支持**：支持轻松上传并插入 PDF、Office 文档、压缩包及音视频等各种附件。
+- **高效多选与批量操作**：支持笔记批量合并、批量移动，以及笔记本拖拽排序与层级调整。
+- **离线草稿与同步队列**：网络不稳定时自动保存离线草稿，恢复连线后自动入队同步。
+- **多账号与个人空间隔离**：单实例支持创建多个独立账号，用户数据相互隔离，配备直观的管理员账号管理与安全加密机制。
+- **全平台多端覆盖**：已上架 Chrome/Edge 网页裁剪插件；支持安装为 PWA 应用；原生移动端 App（iOS/Android）即将上线，Android APK 可在 Release 页面即刻下载体验；原生桌面端计划基于 Electron + Rust Sidecar 构建。
+
+## 部署
+
+EdgeEver 采用纯 Serverless 架构，完全运行在 Cloudflare 免费配额内，**无需购买服务器/VPS，也无需配置 Docker 或 SSL 证书**。
+
+您可以选择以下两种方式之一在线部署：
+
+### 方案一：AI Agent 一键部署（推荐）
+
+将下方提示词直接复制发送给已配置 GitHub、Cloudflare MCP/插件或其他可用集成的 AI Agent（如 Codex, Claude, Cursor, Antigravity, OpenClaw, Hermes Agent 等）：
+
+```text
+请在线完成 EdgeEver 部署：
+1. Fork https://github.com/tianma-if/edgeever。
+2. 将这个 Fork 导入 Cloudflare Workers & Pages。
+3. 配置 D1、R2、`EDGE_EVER_AUTH_PASSWORD` Worker Secret 和生产环境 `main` 构建。
+4. 启动首次构建，验证 `/api/health`、`/api/openapi.json` 和登录。
+5. 启用并手动运行一次 `Update deployed EdgeEver`。
+```
+
+> 详细约定与要求请查看：[AI Agent 在线部署约定](docs/agent-deploy-cloudflare.zh-CN.md)。
+
+### 方案二：手动在线部署
+
+仅需在网页端完成 4 步极简配置：
+
+1. **Fork 仓库**：在 GitHub 点击右上角 **Fork**，将项目 Fork 到您的个人账户下。
+2. **导入 Cloudflare**：登录 Cloudflare 控制台，进入 **Workers & Pages**，选择导入该 Fork 仓库。
+3. **绑定资源与密码**：绑定 D1 数据库（`DB`）、R2 存储桶（`RESOURCES`），并添加 Worker Secret `EDGE_EVER_AUTH_PASSWORD` 作为登录密码。
+4. **启动构建与验证**：使用默认构建配置启动首次构建，部署完成后访问 `/api/health` 确认返回 `200` 即可开始使用。
+
+> 📖 包含具体参数与构建命令的详细步骤，请查看 [在线部署完整文档](docs/deploy-cloudflare-button.zh-CN.md)。
+
+## 多账号登录
+
+部署完成后，单个实例支持多账号登录。
+
+实例管理员可以在 **个人中心** -> **账号管理** 中创建、停用成员账号或重置密码。每个成员拥有完全隔离的个人空间，包括笔记本、笔记、附件、回收站、导入导出和 MCP Token 等。
+
 
 ## PWA 安装说明
 
@@ -76,23 +99,15 @@ PC 端请使用 Chrome/Edge 打开站点，点击地址栏右侧的“安装”�
 
 ## Chrome/Edge 网页裁剪插件
 
-仓库在 `apps/extension` 中包含一个 Chrome/Edge Manifest V3 网页裁剪插件。用户可以配置自己的 EdgeEver 实例和 API Token，然后将选中内容或当前文章保存为可搜索笔记。
+Chrome/Edge 网页裁剪插件已正式上架，您可以通过以下链接直接安装使用（Edge 浏览器亦可直接在 Chrome 应用商店中安装）：
 
-当前 MVP 在浏览器中使用 Mozilla Readability 提取正文，再使用 Turndown 转换为 Markdown。暂时还不会保存完整的单文件 HTML，也不会将网页资源上传到 R2。
-
-在仓库根目录构建插件：
-
-```sh
-bun run build:extension
-```
-
-然后打开 `chrome://extensions` 或 `edge://extensions`，开启开发者模式，加载 `apps/extension/dist`。API Token 至少需要 `read:notebooks` 和 `write:memos` 权限。
+- [Chrome Web Store 安装地址](https://chromewebstore.google.com/detail/edgeever-web-clipper/gjadpfmanienmlofajibkfkkpfdkclgo)
 
 ## 关于客户端
 
-原生客户端已纳入 EdgeEver 的开发计划。移动端 App 计划基于 React Native 构建，桌面端 App 计划基于 Tauri 构建。
+APP端初版已开发完成，上架审核中。
 
-目标是让用户可以将这些客户端连接到自己的自托管 EdgeEver 实例，在继续保持 Cloudflare 后端、开放 API 和用户自有数据模型的同时，获得更顺滑的移动端与桌面端原生体验。
+原生桌面端 App 计划基于 Electron + Rust Sidecar 构建。
 
 ## 技术栈
 
@@ -100,6 +115,7 @@ bun run build:extension
 - 官网：Astro 静态站点，位于 `apps/site`，可独立构建并部署到 Cloudflare Pages。
 - 前端：Vite、React、React Router、TanStack Query，UI 基于 Tailwind CSS、shadcn/ui、Radix UI。
 - 编辑器：TipTap / ProseMirror，支持 Markdown；PWA 使用 vite-plugin-pwa、Workbox、Dexie。
+- 移动 App：Expo + React Native，采用 SQLite 本地存储与增量同步。
 - 网页裁剪：Manifest V3、Mozilla Readability、Turndown，支持 Chrome 与 Microsoft Edge。
 - 后端：Cloudflare Workers、Hono、Zod、D1、R2，提供 REST API、OpenAPI 与 Remote MCP。
 
@@ -117,10 +133,16 @@ bun install
 bun run db:migrate:local
 ```
 
-启动本地开发：
+启动默认开发环境。它会先应用本地迁移，并在首次启动时使用仓库内固定的 Demo 种子初始化本地 D1/R2；后续重启会保留本地修改，且不会连接任何远程实例。
 
 ```sh
 bun run dev
+```
+
+如需明确连接已配置的远程实例，必须显式指定实例名：
+
+```sh
+EDGE_EVER_INSTANCE=<实例名> bun run dev:remote
 ```
 
 常用检查：
@@ -155,6 +177,8 @@ content_json      TipTap/ProseMirror 文档，编辑器权威格式
 content_markdown  API、Agent、导入导出使用
 content_text      搜索、摘要和索引使用
 ```
+
+请打开 **我的** -> **导入与导出**，导出或导入 EdgeEver ZIP。压缩包中的 `notes/` 目录可直接作为 Markdown 阅读和迁移，结构化数据则用于在 EdgeEver 实例之间完整恢复；导入时目标实例中的无关数据会保留，相同 EdgeEver ID 的内容会被覆盖。
 
 ## API 文档
 
@@ -201,6 +225,16 @@ Cloudflare Worker 侧执行图片处理会消耗计算/图片处理额度，因�
 <p align="center">
   <img src="assets/wechat-group-qr.jpg" alt="EdgeEver AI 交流群二维码" width="360" />
 </p>
+
+## Docker 部署规划
+
+> 🐳 面向 VPS、NAS 和家庭服务器的 Docker 私有化部署已纳入规划，但当前还不是正式支持的发行方式。现在已经提供用于适配器开发的实验性 Bun 运行入口，支持 SQLite + 本地文件或 S3 兼容存储；PostgreSQL 目前仍只预留契约。详见[自托管与 Docker 架构预留](docs/self-hosting-architecture.zh-CN.md)。
+
+## 致谢
+
+- 编辑器主题的视觉设计参考自 [gzh-design-skill](https://github.com/isjiamu/gzh-design-skill)。
+- “minimal品牌绿”主题排版架构借鉴于 [obsidian-minimal](https://github.com/kepano/obsidian-minimal)。
+- “Outline 品牌绿”主题排版架构借鉴于 [Outline](https://github.com/outline/outline)。
 
 ## 免责声明
 

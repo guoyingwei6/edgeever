@@ -10,15 +10,28 @@ import {
   Code2,
   List,
   ListOrdered,
+  ListIndentDecrease,
+  ListIndentIncrease,
   Quote,
   SquareCode,
+  Workflow,
   Minus,
+  Paperclip,
+  Blocks,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { getActiveBlockValue } from "@/lib/app-helpers";
 import { CODE_BLOCK_LANGUAGES, getCodeBlockLanguageValue } from "@/lib/code-block";
+import { EditorTableMenu } from "@/components/EditorTableMenu";
+import { insertThemeBlock, type ThemeBlockKind } from "./ThemeBlock";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 const EditorToolbarButton = ({
   active = false,
@@ -98,7 +111,43 @@ const toggleCodeBlock = (editor: Editor) => {
     .run();
 };
 
-export const EditorToolbar = ({ editor, readOnly }: { editor: Editor | null; readOnly: boolean }) => {
+const insertMermaidDiagram = (editor: Editor) => {
+  if (editor.isActive("codeBlock")) {
+    editor.chain().focus().updateAttributes("codeBlock", { language: "mermaid" }).run();
+    return;
+  }
+
+  const { from, to } = editor.state.selection;
+  const selectedText = editor.state.doc.textBetween(from, to, "\n", "\n").trim();
+  const source = selectedText || "flowchart LR\n  A[Start] --> B[End]";
+
+  editor
+    .chain()
+    .focus()
+    .insertContentAt(
+      { from, to },
+      {
+        type: "codeBlock",
+        attrs: { language: "mermaid" },
+        content: [{ type: "text", text: source }],
+      }
+    )
+    .run();
+};
+
+export const EditorToolbar = ({
+  editor,
+  readOnly,
+  markdownMode = false,
+  onMarkdownModeChange,
+  onPickAttachment,
+}: {
+  editor: Editor | null;
+  readOnly: boolean;
+  markdownMode?: boolean;
+  onMarkdownModeChange?: () => void;
+  onPickAttachment?: () => void;
+}) => {
   const { t } = useTranslation();
   const editorReady = isToolbarEditorReady(editor);
   const disabled = readOnly || !editorReady;
@@ -170,7 +219,7 @@ export const EditorToolbar = ({ editor, readOnly }: { editor: Editor | null; rea
   };
 
   return (
-    <TooltipProvider delayDuration={250} skipDelayDuration={100}>
+    <TooltipProvider delayDuration={0} skipDelayDuration={0}>
       <div className="relative border-t border-slate-200 bg-white">
         <div className="pointer-events-none absolute inset-y-0 left-0 z-10 w-4 bg-gradient-to-r from-white to-transparent sm:hidden" />
         <div className="pointer-events-none absolute inset-y-0 right-0 z-10 w-4 bg-gradient-to-l from-white to-transparent sm:hidden" />
@@ -179,6 +228,44 @@ export const EditorToolbar = ({ editor, readOnly }: { editor: Editor | null; rea
           role="toolbar"
           aria-label={t("editorToolbar.toolbar")}
         >
+          {onMarkdownModeChange && (
+            <>
+              <button
+                className={cn(
+                  "flex h-8 shrink-0 items-center rounded-md border px-2.5 text-xs font-medium transition disabled:pointer-events-none disabled:opacity-40",
+                  markdownMode
+                    ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                    : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                )}
+                type="button"
+                title={markdownMode ? t("editorToolbar.richText") : t("editorToolbar.markdown")}
+                aria-label={markdownMode ? t("editorToolbar.richText") : t("editorToolbar.markdown")}
+                aria-pressed={markdownMode}
+                disabled={readOnly}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={onMarkdownModeChange}
+              >
+                {markdownMode ? t("editorToolbar.switchToRichText") : t("editorToolbar.switchToMarkdown")}
+              </button>
+              <ToolbarDivider />
+            </>
+          )}
+          {onPickAttachment && (
+            <>
+              <EditorToolbarButton
+                title={t("editorToolbar.attachment")}
+                disabled={readOnly}
+                onClick={onPickAttachment}
+              >
+                <Paperclip className="h-4 w-4" />
+              </EditorToolbarButton>
+              <ToolbarDivider />
+            </>
+          )}
+          {markdownMode ? (
+            <span className="shrink-0 text-xs text-slate-500">{t("editorToolbar.markdownSource")}</span>
+          ) : (
+            <>
           <Select
             value={blockValue}
             disabled={disabled}
@@ -263,6 +350,20 @@ export const EditorToolbar = ({ editor, readOnly }: { editor: Editor | null; rea
             <ListOrdered className="h-4 w-4" />
           </EditorToolbarButton>
           <EditorToolbarButton
+            title={t("editorToolbar.increaseListIndent")}
+            disabled={!canRun((current) => current.can().chain().focus().sinkListItem("listItem").run())}
+            onClick={() => run((current) => current.chain().focus().sinkListItem("listItem").run())}
+          >
+            <ListIndentIncrease className="h-4 w-4" />
+          </EditorToolbarButton>
+          <EditorToolbarButton
+            title={t("editorToolbar.decreaseListIndent")}
+            disabled={!canRun((current) => current.can().chain().focus().liftListItem("listItem").run())}
+            onClick={() => run((current) => current.chain().focus().liftListItem("listItem").run())}
+          >
+            <ListIndentDecrease className="h-4 w-4" />
+          </EditorToolbarButton>
+          <EditorToolbarButton
             title={t("editorToolbar.quote")}
             active={isActive("blockquote")}
             disabled={disabled}
@@ -277,6 +378,14 @@ export const EditorToolbar = ({ editor, readOnly }: { editor: Editor | null; rea
             onClick={() => run(toggleCodeBlock)}
           >
             <SquareCode className="h-4 w-4" />
+          </EditorToolbarButton>
+          <EditorToolbarButton
+            title={t("editorToolbar.mermaidDiagram")}
+            active={codeBlockActive && codeBlockLanguage === "mermaid"}
+            disabled={disabled}
+            onClick={() => run(insertMermaidDiagram)}
+          >
+            <Workflow className="h-4 w-4" />
           </EditorToolbarButton>
           {showCodeLanguageSelector && (
             <Select
@@ -308,6 +417,30 @@ export const EditorToolbar = ({ editor, readOnly }: { editor: Editor | null; rea
           >
             <Minus className="h-4 w-4" />
           </EditorToolbarButton>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-transparent bg-transparent text-slate-700 transition hover:border-slate-200 hover:bg-slate-50 disabled:pointer-events-none disabled:opacity-40"
+                aria-label={t("editorToolbar.themeBlock")}
+                title={t("editorToolbar.themeBlock")}
+                disabled={disabled}
+                onMouseDown={(event) => event.preventDefault()}
+              >
+                <Blocks className="h-4 w-4" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              {(["intro", "key-point", "callout", "chapter"] as ThemeBlockKind[]).map((kind) => (
+                <DropdownMenuItem key={kind} onSelect={() => run((current) => insertThemeBlock(current, kind))}>
+                  {t(`editorToolbar.themeBlocks.${kind}`)}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <EditorTableMenu editor={editor} readOnly={readOnly} />
+            </>
+          )}
         </div>
       </div>
     </TooltipProvider>

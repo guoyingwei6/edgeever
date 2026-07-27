@@ -1,40 +1,49 @@
 # AGENTS.md
 
-本文件用于约束和指导参与本项目的 AI 代理与协作者。除非用户明确给出更高优先级的指令，否则应遵守以下规则。
+本文件用于约束和指导参与本项目的 AI 代理与协作者。
 
-## 项目背景与技术栈
+## 文档与分支约束
 
-涉及本项目的背景、定位、部署信息与技术栈说明时，请优先参考 `README.md`。
+- **技术栈与背景**：优先参考 `README.md`。
+- **双语同步**：修改中文文档时必须同步更新对应的英文文档。
+- **分支规范**：严禁创建新分支，所有修改与提交必须直接在 `main` 分支上完成。
 
-## Git 分支约束
+## GitHub Release 约束与流程
 
-严禁创建新的 Git 分支；所有修改、提交和推送都必须直接在 `main` 分支上完成。
+1. **版本号与基线**：使用 `vX.Y.Z` 格式（非 Draft/Prerelease）。递增根目录 `package.json`；若含移动端修改，同步更新 `apps/mobile/app.json` 的 `expo.version` 并递增 `android.versionCode`。上一个实际 Release 为审计基线。
+2. **验证命令**：必须通过 `bun run typecheck`、`bun run typecheck:mobile` 和 `bun run build:web`。
+3. **APK 构建与签名**：仅当变更影响移动端运行时代码、共享依赖、原生配置或构建工具时，执行 `bun run build:android:apk:local` 构建生产签名 APK，命名为 `edgeever-android-vX.Y.Z-arm64-v8a.apk`（签名配置必须位于仓库外 `~/.config/edgeever/android/signing.env`）。无移动端变更时复用最近兼容 APK。
+4. **Release 说明结构**：使用中英文双语格式（正文禁止包含字面量 `\n`）。功能/修复关联对应 Issue 并标记 Label，发布后回链并关闭 Issue。正文结构：
 
-## Cloudflare 自动部署约束
+```md
+## Key Changes
 
-当用户要求“根据 GitHub 项目链接把本项目安装部署到 Cloudflare”时，应优先按 `docs/agent-deploy-cloudflare.md` 执行。
+- User-facing summary of changes in English.
 
-推荐流程：
+Related Issue: #<issue-number>
 
-```sh
-bun install
-EDGE_EVER_PASSWORD='<首次登录密码>' bun run deploy:setup
-bun run deploy:doctor
-bun run deploy
+## Verification
+
+- List completed tests, type checks, and build results in English.
+
+## 🇨🇳 中文说明 / Chinese Changelog
+
+## 主要更新
+
+- 面向用户说明本次变化及影响。
+
+关联 Issue：#<issue-number>
+
+## 验证
+
+- 列出实际完成的测试、类型检查和构建结果。
+
 ```
 
-如果用户没有提供首次登录密码，应只询问这一个必要信息，或在用户同意后生成随机密码。Cloudflare 授权、账号、D1/R2 资源、Worker 名称、自定义域名等私有配置必须来自用户环境、Cloudflare MCP/插件、Wrangler 登录态或 `.env.local`，严禁硬编码到仓库文件。
+## 环境、部署与组件约束
 
-部署脚本必须通过 `scripts/run-wrangler.mjs` 读取 `.env.local` 并生成临时 Wrangler 配置。不要直接修改 `wrangler.toml` 来写入个人 `database_id`、bucket 名称、Worker 名称或 route。
-
-## 本地启动约束
-
-本地预览或调试时，必须优先使用 `bun run dev` 启动完整开发环境，让 API 通过 `scripts/run-wrangler.mjs` 读取 `.env.local` 中的个性化实例配置。实例名称、D1/R2 资源、账号等本机私有配置均以 `.env.local` 为准，严禁在代理指令或代码中硬编码个人实例名。
-
-除非用户明确要求只启动前端静态界面，否则不要单独运行 `bun run dev:web`；该命令不会启动 API，也不会保证读取 `.env.local` 中的实例配置，容易导致前端请求 `127.0.0.1:8787` 失败或误判环境。
-
-## 组件复用与造轮子约束
-
-UI 功能应尽量复用 `shadcn/ui` 等现有 UI 组件。在实现其他功能时，也应优先采用成熟、稳定的开源组件或库，绝对禁止在没有充分必要性的前提下自行从零造轮子。
-
-为方便代码维护，当页面或功能模块出现复杂结构、重复布局或潜在复用场景时，应视情况封装为独立组件，保持页面入口聚焦于组合与数据传递。
+- **Cloudflare 部署**：严格按 `docs/agent-deploy-cloudflare.md` 执行。
+- **数据库 Migration**：数据库或种子变化时，在 `migrations/` 下新增递增编号 SQL，禁止修改已执行的旧 Migration。
+- **本地启动**：默认 `bun run dev`（纯本地环境）；指定远程实例用 `EDGE_EVER_INSTANCE=<实例名> bun run dev:remote`；纯前端用 `bun run dev:web`。
+- **Demo 示例同步**：修改示例笔记后，在 `main` 分支干净状态下执行 `bun run demo:sync` 重置公开 Demo。
+- **组件复用**：优先复用 `shadcn/ui` 与已成熟依赖，禁止无意义造轮子；复杂或重复模块封装为独立组件。

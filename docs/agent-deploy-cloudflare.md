@@ -1,142 +1,45 @@
-# AI Agent Cloudflare Deployment
+# AI Agent Cloudflare Deployment Guide
 
-This document is the deployment contract for AI agents. If a user asks an agent to deploy EdgeEver from a GitHub URL to Cloudflare, follow this runbook before asking the user for anything.
+This document defines the standard operating specifications and conventions for AI Agents (and automated deployment scripts) deploying EdgeEver on Cloudflare.
 
-## One Prompt Install
+> 💡 **Core Principle**: Pure Serverless architecture running entirely within Cloudflare free limits—no VPS or server purchasing, no Docker or SSL certificate configuration required.
 
-Users should be able to start with only this prompt:
+---
 
-```text
-This is the GitHub project URL: <repo-url>. Install and deploy this project to Cloudflare for me.
-```
+## Standard Automated Deployment Steps
 
-Chinese version:
+1. **Fork Repository**
+   - Fork `tianma-if/edgeever` to the target GitHub account.
 
-```text
-这个是 GitHub 上的项目链接：<repo-url>。请把这个项目安装部署到 Cloudflare 上。
-```
+2. **Enable Workflow**
+   - In the **Actions** tab of the Forked repository, enable the **Update deployed EdgeEver** automatic update workflow.
 
-## Agent Rules
+3. **Cloudflare Project Import**
+   - Log into the Cloudflare **Workers & Pages** console and import the Fork repository.
+   - Configure the project to use the repository root, the production `main` branch, and read the root `wrangler.toml`.
 
-- Read `AGENTS.md`, `README.md`, `.env.local.example`, and this file first.
-- Do not create a new Git branch. Work on `main`.
-- Prefer `bun run deploy:setup`, `bun run deploy:doctor`, and `bun run deploy`.
-- Do not hard-code a personal Worker name, D1 database ID, R2 bucket name, account ID, API token, or domain in source files.
-- Use `.env.local` for local/private deployment values. It is git-ignored.
-- If the Cloudflare MCP or Cloudflare plugin is available, it may be used to inspect or create resources. If not, use Wrangler through the scripts in this repo.
-- Ask the user only for values that cannot be inferred or generated safely, such as Cloudflare authorization, the first login password, or custom domain ownership.
+4. **Resource Bindings & Secrets**
+   - **D1 Database Binding**: Binding name `DB`, associated with a database named exactly `edgeever`.
+   - **R2 Bucket Binding**: Binding name `RESOURCES`, associated with a globally unique R2 Bucket.
+   - **Admin username**: Configure `EDGE_EVER_AUTH_USERNAME`; it defaults to `admin` and can be replaced with a custom username.
+   - **Worker Secret**: Add secret `EDGE_EVER_AUTH_PASSWORD` for initial admin password.
 
-## Required Tools
+5. **Configure Workers Builds Commands**
+   - In the Cloudflare project build settings, set the standard commands:
 
-- Bun
-- Wrangler, installed by `bun install` as a project dev dependency
-- A Cloudflare account authorized by either `wrangler login` or `CLOUDFLARE_API_TOKEN`
+     ```text
+     Build command: bun install --frozen-lockfile && EDGE_EVER_DEPLOYMENT_TRIGGER=main_push EDGE_EVER_DEPLOYMENT_METHOD=cloudflare_workers_builds bun run build:cloudflare
+     Deploy command: bun run deploy:cloudflare-builds
+     ```
 
-## Standard Flow
+   - The deploy command automatically resolves the D1 UUID from the `edgeever` database name and writes it only to a temporary generated Wrangler configuration. Users do not need to edit `wrangler.toml` or copy a D1 ID into a build variable.
+   - Ensure the Workers Builds API token can read and edit D1. An advanced deployment that uses a differently named database must set the build variable `EDGE_EVER_D1_DATABASE_ID` explicitly.
 
-1. Clone the repository and enter it.
+6. **Start Initial Build & Verify Service**
+   - Trigger the initial build. Once deployed, run the following automated verifications:
+     - Check `https://<your-worker-domain>/api/health` returns HTTP `200` with JSON `{"ok": true}`.
+     - Check `https://<your-worker-domain>/api/openapi.json` loads the OpenAPI schema properly.
+     - Verify login API using the configured `EDGE_EVER_AUTH_USERNAME` (default `admin`) and `EDGE_EVER_AUTH_PASSWORD`.
 
-   ```sh
-   git clone <repo-url>
-   cd edgeever
-   ```
-
-2. Install dependencies.
-
-   ```sh
-   bun install
-   ```
-
-3. Ensure Cloudflare authentication.
-
-   ```sh
-   bunx wrangler whoami
-   ```
-
-   If this fails, ask the user to finish Cloudflare login or provide a suitable API token. Do not continue deployment until this works.
-
-4. Prepare deployment resources and `.env.local`.
-
-   If the user gave a first login password, run:
-
-   ```sh
-   EDGE_EVER_PASSWORD='<first-login-password>' bun run deploy:setup
-   ```
-
-   If no password was provided, ask for one or ask permission to generate a random password. Then rerun the command with `EDGE_EVER_PASSWORD`.
-
-   `deploy:setup` will:
-
-   - copy `.env.local.example` to `.env.local` when needed
-   - reuse or create the D1 database
-   - create the R2 buckets when needed
-   - generate `EDGE_EVER_AUTH_PASSWORD_HASH` from `EDGE_EVER_PASSWORD`
-
-5. Check the deployment inputs.
-
-   ```sh
-   bun run deploy:doctor
-   ```
-
-   Fix every `fail` result before deploying.
-
-6. Deploy.
-
-   ```sh
-   bun run deploy
-   ```
-
-   `bun run deploy` builds the web app, applies remote D1 migrations, and deploys the Worker. During deploy, `scripts/run-wrangler.mjs` uploads `EDGE_EVER_AUTH_PASSWORD_HASH` as a Worker Secret via a generated `.env.wrangler.generated*.secrets` file, then synchronizes it again with `wrangler secret put` after a successful deployment so the first login does not depend on the bulk secrets upload alone.
-
-7. Verify the result.
-
-   Use the Worker URL from Wrangler output, then check:
-
-   ```sh
-   curl -I https://<worker-url>/
-   curl https://<worker-url>/api/openapi.json
-   ```
-
-   Open the site, log in with `EDGE_EVER_AUTH_USERNAME` and the first login password, then create an MCP token from the in-app MCP settings.
-
-## Optional Customization
-
-Set these values in `.env.local` before `bun run deploy:setup` or `bun run deploy`:
-
-```sh
-EDGE_EVER_WORKER_NAME=edgeever
-EDGE_EVER_D1_DATABASE_NAME=edgeever
-EDGE_EVER_R2_BUCKET_NAME=edgeever-resources
-EDGE_EVER_R2_PREVIEW_BUCKET_NAME=edgeever-resources-preview
-EDGE_EVER_AUTH_USERNAME=admin
-EDGE_EVER_SESSION_TTL_DAYS=400
-EDGE_EVER_CUSTOM_DOMAIN=notes.example.com
-```
-
-For multiple instances, set `EDGE_EVER_INSTANCE=<name>` and use scoped variables such as:
-
-```sh
-EDGE_EVER_PROD_WORKER_NAME=edgeever-prod
-EDGE_EVER_PROD_D1_DATABASE_ID=<database-id>
-EDGE_EVER_PROD_R2_BUCKET_NAME=edgeever-prod-resources
-EDGE_EVER_PROD_AUTH_PASSWORD_HASH=<password-hash>
-```
-
-## Blocking Conditions
-
-Stop and ask the user only when:
-
-- Cloudflare authentication is missing and the agent cannot open or complete login.
-- The user must choose or provide the first login password.
-- The requested custom domain is not available in the Cloudflare account.
-- Resource creation fails because of account limits, permissions, billing, or conflicting names that cannot be resolved by choosing a new name.
-
-## Final User Response
-
-After deployment, report:
-
-- deployed URL
-- login username
-- whether the password was user-provided or generated
-- where to create the EdgeEver MCP token in the app
-- any custom domain or Cloudflare DNS step that remains
+7. **Verify Upstream Update Channel**
+   - Manually trigger **Update deployed EdgeEver** once in the Fork's **Actions** tab to confirm upstream synchronization and automated builds work properly.

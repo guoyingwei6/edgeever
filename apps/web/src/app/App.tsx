@@ -1,10 +1,12 @@
 import { lazy, Suspense, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Navigate, Route, Routes, useNavigate } from "react-router";
+import { useTranslation } from "react-i18next";
 import { PwaUpdateNotice } from "@/components/PwaUpdateNotice";
+import { ReleaseUpdateNotice } from "@/components/ReleaseUpdateNotice";
 import { PwaInstallProvider } from "@/components/PwaInstallContext";
 import { PwaIosPrompt } from "@/components/PwaIosPrompt";
-import { api } from "@/lib/api";
+import { api, ApiRequestError } from "@/lib/api";
 import { EVERNOTE_MIGRATION_PATH } from "@/lib/routes";
 import type { AuthSession } from "@edgeever/shared";
 
@@ -41,6 +43,7 @@ const EvernoteMigrationRoute = () => {
 
 const AuthenticatedWorkspace = () => {
   const queryClient = useQueryClient();
+  const { t } = useTranslation();
 
   const sessionQuery = useQuery({
     queryKey: ["auth", "session"],
@@ -63,6 +66,7 @@ const AuthenticatedWorkspace = () => {
       queryClient.setQueryData<AuthSession>(["auth", "session"], {
         authRequired: true,
         authenticated: false,
+        demoMode: sessionQuery.data?.demoMode ?? false,
         user: null,
       });
     },
@@ -75,6 +79,7 @@ const AuthenticatedWorkspace = () => {
       queryClient.setQueryData<AuthSession>(["auth", "session"], {
         authRequired: current?.authRequired ?? true,
         authenticated: false,
+        demoMode: current?.demoMode ?? false,
         user: null,
       });
     };
@@ -88,12 +93,29 @@ const AuthenticatedWorkspace = () => {
   }
 
   const session = sessionQuery.data;
+  const configurationError =
+    sessionQuery.error instanceof ApiRequestError
+      ? sessionQuery.error.code === "auth_not_configured"
+        ? t("login.authNotConfigured")
+        : sessionQuery.error.code === "database_not_ready"
+          ? t("login.databaseNotReady")
+          : t("login.instanceUnavailable")
+      : sessionQuery.error
+        ? t("login.instanceUnavailable")
+        : null;
+  const loginError =
+    loginMutation.error instanceof ApiRequestError && loginMutation.error.code === "password_hash_invalid"
+      ? t("login.passwordHashInvalid")
+      : loginMutation.error instanceof Error
+        ? loginMutation.error.message
+        : null;
 
   if (!session?.authenticated) {
     return (
       <Suspense fallback={<AuthLoadingScreen />}>
         <LoginScreen
-          error={loginMutation.error instanceof Error ? loginMutation.error.message : null}
+          configurationError={configurationError}
+          error={loginError}
           isSubmitting={loginMutation.isPending}
           onSubmit={(payload) => loginMutation.mutate(payload)}
         />
@@ -103,12 +125,16 @@ const AuthenticatedWorkspace = () => {
 
   return (
     <Suspense fallback={<AuthLoadingScreen />}>
-      <WorkspaceApp
-        authRequired={session.authRequired}
-        isLoggingOut={logoutMutation.isPending}
-        user={session.user}
-        onLogout={() => logoutMutation.mutate()}
-      />
+      <>
+        <WorkspaceApp
+          authRequired={session.authRequired}
+          demoMode={session.demoMode}
+          isLoggingOut={logoutMutation.isPending}
+          user={session.user}
+          onLogout={() => logoutMutation.mutate()}
+        />
+        <ReleaseUpdateNotice />
+      </>
     </Suspense>
   );
 };
@@ -119,6 +145,7 @@ export const App = () => (
       <Route path={EVERNOTE_MIGRATION_PATH} element={<EvernoteMigrationRoute />} />
       <Route path="/" element={<AuthenticatedWorkspace />} />
       <Route path="/settings" element={<AuthenticatedWorkspace />} />
+      <Route path="/templates" element={<AuthenticatedWorkspace />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
     <PwaUpdateNotice />

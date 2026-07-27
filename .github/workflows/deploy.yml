@@ -9,7 +9,7 @@ on:
       - "apps/mobile/**"
       - ".github/workflows/deploy-site.yml"
       - ".github/workflows/mobile-build.yml"
-      - ".github/workflows/sync-upstream.yml"
+      - ".github/workflows/sync-edgeever-upstream.yml"
   workflow_dispatch:
 
 permissions:
@@ -38,6 +38,8 @@ jobs:
       EDGE_EVER_AUTH_PASSWORD_HASH: ${{ secrets.EDGE_EVER_AUTH_PASSWORD_HASH }}
       EDGE_EVER_SESSION_TTL_DAYS: "400"
       EDGE_EVER_DEMO_MODE: "false"
+      EDGE_EVER_DEPLOYMENT_TRIGGER: ${{ github.event_name == 'push' && 'main_push' || 'manual' }}
+      EDGE_EVER_DEPLOYMENT_METHOD: "github_actions"
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -48,14 +50,5 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Typecheck
-        run: bun run typecheck
-
-      - name: Build web app
-        run: bun run build
-
-      - name: Apply D1 migrations
-        run: bun scripts/run-wrangler.mjs d1 migrations apply DB --remote
-
-      - name: Deploy Worker
-        run: bun scripts/run-wrangler.mjs deploy
+      - name: Build, migrate, deploy, and verify
+        run: bun run deploy

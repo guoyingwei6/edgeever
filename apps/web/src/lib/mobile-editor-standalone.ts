@@ -1,7 +1,6 @@
-import { emptyDoc, markdownToDoc, type MemoDetail, type Resource, type TiptapDoc } from "@edgeever/shared";
+import { emptyDoc, resolveMemoContentDoc, type MemoDetail, type Resource, type TiptapDoc } from "@edgeever/shared";
 import { ApiRequestError } from "@/lib/api";
 
-export const MOBILE_EDITOR_AUTO_SAVE_DELAY_MS = 1200;
 export const MOBILE_EDITOR_LEAVE_SAVE_TIMEOUT_MS = 1600;
 export const MOBILE_EDITOR_INITIAL_FOCUS_DELAY_MS = 160;
 export const MOBILE_EDITOR_DRAFT_STORAGE_PREFIX = "edgeever-mobile-tiptap-draft:";
@@ -115,13 +114,9 @@ export const uploadMobileEditorResource = async (memoId: string, file: File) => 
 };
 
 export const normalizeMobileEditorDoc = (memo: MemoDetail): TiptapDoc => {
-  if (memo.contentJson && typeof memo.contentJson === "object") {
-    return memo.contentJson as TiptapDoc;
+  if (!memo.contentJson && !memo.contentMarkdown) {
+    return emptyDoc();
   }
 
-  if (memo.contentMarkdown) {
-    return markdownToDoc(memo.contentMarkdown);
-  }
-
-  return emptyDoc();
+  return resolveMemoContentDoc(memo.contentJson, memo.contentMarkdown);
 };
