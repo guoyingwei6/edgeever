@@ -631,6 +631,7 @@ export const enUS = {
     orderedList: "Numbered list",
     increaseListIndent: "Increase list level (Tab)",
     decreaseListIndent: "Decrease list level (Shift + Tab)",
+    listIndentHint: "Tab increases level · Shift + Tab decreases level",
     quote: "Quote",
     codeBlock: "Code block",
     copyCode: "Copy code",
@@ -645,7 +646,7 @@ export const enUS = {
     mermaidEmpty: "Enter Mermaid source below to generate a diagram.",
     mermaidSource: "Mermaid source",
     horizontalRule: "Divider",
-    themeBlock: "Themed block",
+    themeBlock: "Insert content block",
     deleteThemeBlock: "Delete themed block",
     themeBlocks: {
       intro: "Intro card",
@@ -667,6 +668,14 @@ export const enUS = {
     switchToMarkdown: "Switch to Markdown mode",
     switchToRichText: "Switch to rich text mode",
     attachment: "Upload attachment",
+    noteLink: "Link a note",
+  },
+  noteLinkPicker: {
+    title: "Link a note",
+    searchPlaceholder: "Search notes to link",
+    empty: "No notes found",
+    loading: "Searching notes...",
+    close: "Close note picker",
   },
   mobileNotebookPicker: {
     title: "Switch notebook",
