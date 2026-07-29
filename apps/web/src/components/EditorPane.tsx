@@ -68,6 +68,7 @@ import { ThemeToggle } from "./ThemeToggle";
 import { useTheme } from "./ThemeProvider";
 import { RevisionHistoryDialog } from "./dialogs/RevisionHistoryDialog";
 import { api } from "@/lib/api";
+import { isDesktopResourceRuntime, stageDesktopResource, toDesktopResourceUrl } from "@/lib/desktop-resources";
 import { consumeStandaloneMobileEditorReturn, openStandaloneMobileEditor } from "@/lib/mobile-editor";
 import { cn, formatDateTime, parseTagsText } from "@/lib/utils";
 import { EDITOR_CONTENT_MAX_WIDTH, EDITOR_CONTENT_MAX_WIDTH_COLLAPSED } from "@/lib/workspace-ui";
@@ -94,7 +95,10 @@ import { codeBlockLowlight, EdgeEverCodeBlock } from "@/lib/code-block";
 import { compressImageForUpload } from "@/lib/image-compression";
 import { localDb, type MemoUpdateSyncPayload } from "@/lib/local-db";
 import { getMemoUpdateQueueId, isMemoUpdateAlreadyApplied, queueMemoUpdate, shouldQueueMemoSaveError } from "@/lib/sync-queue";
+import { isLocalMemoId } from "@/lib/local-mirror";
+import type { EdgeEverRepository } from "@/lib/repository";
 import {
+  EDITOR_LOCAL_SAVE_DELAY_MS,
   getEditableMemoTitle,
   getNotebookMoveOptions,
 } from "@/lib/app-helpers";
@@ -105,11 +109,25 @@ import { fetchLatestRelease, isVersionOutdated } from "@/lib/version-check";
 import { RELEASE_STATUS_EVENT } from "@/lib/release-notice";
 import { downloadMarkdownFile } from "@/lib/note-markdown-export";
 import { openNotePrintPreview, serializeNoteDocumentForPrint } from "@/lib/note-print";
+import { isBrowserOffline } from "@/lib/network-status";
 
 const SUPPORTED_PASTE_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"]);
 const MOBILE_EDITOR_QUERY = "(max-width: 639px)";
 const MOBILE_DRAFT_PERSIST_DELAY_MS = 800;
 const NOTE_SEARCH_HIGHLIGHT_PLUGIN_KEY = new PluginKey("edgeever-note-search-highlight");
+
+const createLocalEditSession = (memo: MemoDetail): MemoEditSession => ({
+  id: `local-edit:${memo.id}`,
+  memoId: memo.id,
+  baseRevision: memo.revision,
+  baseContentHash: memo.contentHash,
+  expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+});
+
+const requiresLocalEditSession = (memo: MemoDetail) =>
+  isDesktopResourceRuntime() ||
+  isLocalMemoId(memo.id) ||
+  isBrowserOffline();
 
 const IconTooltip = ({ label, children }: { label: string; children: ReactNode }) => (
   <TooltipProvider delayDuration={0} skipDelayDuration={0}>
@@ -497,6 +515,7 @@ const MobileNotebookSelectSheet = ({
 
 type EditorPaneProps = {
   memo: MemoDetail | null;
+  repository: EdgeEverRepository;
   desktopFocusMode: boolean;
   onToggleDesktopFocusMode: () => void;
   mobileDefaultEditMemoId: string | null;
@@ -507,7 +526,6 @@ type EditorPaneProps = {
   isLoading: boolean;
   contentSearchQuery?: string;
   imageCompressionEnabled: boolean;
-  autoSaveIntervalMs: number | null;
   hasNextMemo: boolean;
   hasPreviousMemo: boolean;
   onBackToList: () => void;
@@ -531,9 +549,9 @@ type RichEditorPaneProps = EditorPaneProps & {
 
 const MobileNativeEditorPane = ({
   memo,
+  repository,
   notebooks,
   isTrashView,
-  autoSaveIntervalMs,
   onBackToList,
   onSaved,
   onMobileDefaultEditConsumed,
@@ -636,29 +654,16 @@ const MobileNativeEditorPane = ({
     };
 
     try {
-      const data = await api.updateMemo(currentMemo.id, {
-        expectedRevision: payload.expectedRevision,
-        expectedContentHash: payload.expectedContentHash,
-        editSessionId: payload.editSessionId,
-        title: payload.title,
-        contentJson: payload.contentJson,
-        tags: payload.tags,
-      });
+      const { memo: localMemo } = await repository.updateMemo(currentMemo, payload);
 
-      memoRef.current = data.memo;
-      editSessionRef.current = {
-        ...editSession,
-        baseRevision: data.memo.revision,
-        baseContentHash: data.memo.contentHash,
-      };
-      await onSaved(data.memo);
+      memoRef.current = localMemo;
+      await onSaved(localMemo);
 
       if (currentSnapshot() === snapshot) {
         hasUnsavedChangesRef.current = false;
         setHasUnsavedChanges(false);
-        await localDb.drafts.delete(data.memo.id);
-        setSaveState("saved");
-        window.setTimeout(() => setSaveState("idle"), 1200);
+        await localDb.drafts.delete(localMemo.id);
+        setSaveState("queued");
       } else {
         persistDraft();
         hasUnsavedChangesRef.current = true;
@@ -695,7 +700,7 @@ const MobileNativeEditorPane = ({
     } finally {
       savingRef.current = false;
     }
-  }, [clearTimers, currentSnapshot, getBodyValue, getTagsValue, getTitleValue, onSaved, persistDraft]);
+  }, [clearTimers, currentSnapshot, getBodyValue, getTagsValue, getTitleValue, onSaved, persistDraft, repository]);
 
   const markDirty = useCallback(() => {
     const currentMemo = memoRef.current;
@@ -721,15 +726,13 @@ const MobileNativeEditorPane = ({
       window.clearTimeout(saveTimerRef.current);
       saveTimerRef.current = null;
     }
-    if (autoSaveIntervalMs !== null) {
-      saveTimerRef.current = window.setTimeout(() => {
-        saveTimerRef.current = null;
-        if (hasUnsavedChangesRef.current) {
-          void saveCurrent();
-        }
-      }, autoSaveIntervalMs);
-    }
-  }, [autoSaveIntervalMs, persistDraft, saveCurrent]);
+    saveTimerRef.current = window.setTimeout(() => {
+      saveTimerRef.current = null;
+      if (hasUnsavedChangesRef.current) {
+        void saveCurrent();
+      }
+    }, EDITOR_LOCAL_SAVE_DELAY_MS);
+  }, [persistDraft, saveCurrent]);
 
   useEffect(() => {
     document.documentElement.classList.add("edgeever-mobile-native-editing");
@@ -774,7 +777,7 @@ const MobileNativeEditorPane = ({
         : await Promise.all([
             localDb.drafts.get(memo.id),
             localDb.syncQueue.get(getMemoUpdateQueueId(memo.id)),
-            api.createMemoEditSession(memo.id),
+            requiresLocalEditSession(memo) ? Promise.resolve(null) : api.createMemoEditSession(memo.id),
           ]);
 
       if (cancelled) {
@@ -798,7 +801,7 @@ const MobileNativeEditorPane = ({
       const nextContent = useDraft && draft
         ? draft.contentJson
         : resolveMemoContentDoc(memo.contentJson, memo.contentMarkdown);
-      editSessionRef.current = editSessionResponse?.editSession ?? null;
+      editSessionRef.current = editSessionResponse?.editSession ?? (requiresLocalEditSession(memo) ? createLocalEditSession(memo) : null);
 
       hydratingRef.current = true;
       editingMemoIdRef.current = memo.id;
@@ -920,7 +923,7 @@ const MobileNativeEditorPane = ({
     saveState === "error" || saveState === "conflict"
       ? "bg-rose-50 text-rose-700"
       : saveState === "queued"
-        ? "bg-amber-50 text-amber-700"
+        ? "bg-amber-50/60 text-amber-600/80"
         : saveState === "saving" || hasUnsavedChanges
           ? "bg-emerald-50 text-emerald-700"
           : "bg-slate-100 text-slate-500";
@@ -1127,6 +1130,7 @@ export const EditorPane = (props: EditorPaneProps) => {
 
 const RichEditorPane = ({
   memo,
+  repository,
   desktopFocusMode,
   onToggleDesktopFocusMode,
   mobileDefaultEditMemoId,
@@ -1137,7 +1141,6 @@ const RichEditorPane = ({
   isLoading,
   contentSearchQuery = "",
   imageCompressionEnabled,
-  autoSaveIntervalMs,
   hasNextMemo,
   hasPreviousMemo,
   onBackToList,
@@ -1194,7 +1197,7 @@ const RichEditorPane = ({
   const [wechatCopyState, setWechatCopyState] = useState<"idle" | "copying" | "copied" | "error">("idle");
   const noteLinkResultsQuery = useQuery({
     queryKey: ["memo-link-search", noteLinkQuery],
-    queryFn: () => api.listMemos({ q: noteLinkQuery, limit: 20 }),
+    queryFn: () => repository.listMemos({ q: noteLinkQuery, limit: 20 }),
     enabled: noteLinkPickerOpen,
   });
   const [editorScrollContainer, setEditorScrollContainer] = useState<HTMLDivElement | null>(null);
@@ -1331,7 +1334,20 @@ const RichEditorPane = ({
           const uploadFile = shouldCompress ? (await compressImageForUpload(file)).file : file;
 
           setImageUploadState("uploading");
-          const { resource } = await api.uploadMemoResource(targetMemoId, uploadFile);
+          let resource: { kind: "image" | "attachment"; filename: string | null; url: string };
+          try {
+            const uploadedResource = (await repository.uploadMemoResource(targetMemoId, uploadFile)).resource;
+            resource = { ...uploadedResource, url: toDesktopResourceUrl(uploadedResource.url) };
+          } catch (error) {
+            if (!isDesktopResourceRuntime()) throw error;
+            const staged = await stageDesktopResource(targetMemoId, uploadFile);
+            if (!staged) throw error;
+            resource = {
+              kind: isImage ? "image" : "attachment",
+              filename: uploadFile.name,
+              url: `edgeever-staged://${staged.id}`,
+            };
+          }
           void queryClient.invalidateQueries({ queryKey: ["resources"] });
 
           const activeEditor = editorRef.current;
@@ -1376,7 +1392,7 @@ const RichEditorPane = ({
         window.setTimeout(() => setImageUploadState("idle"), 2200);
       }
     })();
-  }, [queryClient, t]);
+  }, [queryClient, repository, t]);
 
   const editor = useEditor({
     extensions: [
@@ -1904,7 +1920,7 @@ const RichEditorPane = ({
         : await Promise.all([
             localDb.drafts.get(memo.id),
             localDb.syncQueue.get(getMemoUpdateQueueId(memo.id)),
-            api.createMemoEditSession(memo.id),
+            requiresLocalEditSession(memo) ? Promise.resolve(null) : api.createMemoEditSession(memo.id),
           ]);
 
       if (cancelled) {
@@ -1952,7 +1968,7 @@ const RichEditorPane = ({
       }
 
       hydratedMemoIdRef.current = memo.id;
-      editSessionRef.current = editSessionResponse?.editSession ?? null;
+      editSessionRef.current = editSessionResponse?.editSession ?? (requiresLocalEditSession(memo) ? createLocalEditSession(memo) : null);
 
       window.setTimeout(() => {
         hydratingRef.current = false;
@@ -2178,26 +2194,11 @@ const RichEditorPane = ({
         contentMarkdown: useMarkdownSourceEditor ? markdownSource : undefined,
         tags: parseTagsText(tagsText),
       };
-      let data;
-
-      try {
-        data = await api.updateMemo(currentMemo.id, {
-          expectedRevision: payload.expectedRevision,
-          expectedContentHash: payload.expectedContentHash,
-          editSessionId: payload.editSessionId,
-          title: payload.title,
-          contentJson: payload.contentJson,
-          contentMarkdown: payload.contentMarkdown,
-          tags: payload.tags,
-        });
-      } catch (error) {
-        throw new MemoSaveRequestError(error, payload, tagsText);
-      }
-
-      return { memo: data.memo, snapshot };
+      const { memo: localMemo } = await repository.updateMemo(currentMemo, payload);
+      return { memo: localMemo, snapshot, queued: true };
     },
     onMutate: () => setSaveState("saving"),
-    onSuccess: async ({ memo: savedMemo, snapshot }) => {
+    onSuccess: async ({ memo: savedMemo, snapshot, queued }) => {
       memoRef.current = savedMemo;
       const currentEditSession = editSessionRef.current;
       if (currentEditSession) {
@@ -2228,8 +2229,10 @@ const RichEditorPane = ({
         hasUnsavedChangesRef.current = false;
         setHasUnsavedChanges(false);
         await localDb.drafts.delete(savedMemo.id);
-        setSaveState("saved");
-        window.setTimeout(() => setSaveState("idle"), 1400);
+        setSaveState(queued ? "queued" : "saved");
+        if (!queued) {
+          window.setTimeout(() => setSaveState("idle"), 1400);
+        }
         return;
       }
 
@@ -2307,23 +2310,21 @@ const RichEditorPane = ({
     if (mobileSaveTimerRef.current !== null) {
       window.clearTimeout(mobileSaveTimerRef.current);
     }
-    if (autoSaveIntervalMs !== null) {
-      mobileSaveTimerRef.current = window.setTimeout(() => {
-        mobileSaveTimerRef.current = null;
-        if (
-          !memoRef.current ||
-          memoRef.current.isDeleted ||
-          !hasUnsavedChangesRef.current ||
-          saveMutation.isPending ||
-          saveState === "conflict"
-        ) {
-          return;
-        }
+    mobileSaveTimerRef.current = window.setTimeout(() => {
+      mobileSaveTimerRef.current = null;
+      if (
+        !memoRef.current ||
+        memoRef.current.isDeleted ||
+        !hasUnsavedChangesRef.current ||
+        saveMutation.isPending ||
+        saveState === "conflict"
+      ) {
+        return;
+      }
 
-        saveMutation.mutate();
-      }, autoSaveIntervalMs);
-    }
-  }, [autoSaveIntervalMs, getMobilePlainTextValue, persistCurrentDraft, saveMutation, saveState, tagsText, title]);
+      saveMutation.mutate();
+    }, EDITOR_LOCAL_SAVE_DELAY_MS);
+  }, [getMobilePlainTextValue, persistCurrentDraft, saveMutation, saveState, tagsText, title]);
 
   useEffect(() => {
     markMobilePlainTextDirtyRef.current = markMobilePlainTextDirty;
@@ -2390,16 +2391,12 @@ const RichEditorPane = ({
       return;
     }
 
-    if (autoSaveIntervalMs === null) {
-      return;
-    }
-
     const timer = window.setTimeout(() => {
       saveMutation.mutate();
-    }, autoSaveIntervalMs);
+    }, EDITOR_LOCAL_SAVE_DELAY_MS);
 
     return () => window.clearTimeout(timer);
-  }, [autoSaveIntervalMs, dirtyVersion, editor, hasUnsavedChanges, memo, saveMutation, saveState, useMobilePlainTextEditor]);
+  }, [dirtyVersion, editor, hasUnsavedChanges, memo, saveMutation, saveState, useMobilePlainTextEditor]);
 
   if (isSelectionMode) {
     return (
@@ -2409,7 +2406,7 @@ const RichEditorPane = ({
     );
   }
 
-  if (isLoading) {
+  if (isLoading && !memo) {
     return (
       <div className="flex h-full min-w-0 flex-col bg-white">
         {selectionActionBar}
@@ -2451,7 +2448,7 @@ const RichEditorPane = ({
     saveState === "error" || saveState === "conflict"
       ? "bg-rose-50 text-rose-700"
       : saveState === "queued"
-        ? "bg-amber-50 text-amber-700"
+        ? "bg-amber-50/60 text-amber-600/80"
         : saveState === "saving" || hasUnsavedChanges
           ? "bg-emerald-50 text-emerald-700"
           : "bg-slate-100 text-slate-500";
@@ -3352,6 +3349,7 @@ const RichEditorPane = ({
                 : memo.contentMarkdown
           }
           memo={memo}
+          repository={repository}
           onClose={() => setHistoryOpen(false)}
           onRestored={async (restoredMemo) => {
             await localDb.drafts.delete(restoredMemo.id);
