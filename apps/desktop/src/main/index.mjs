@@ -1,22 +1,26 @@
-import { app, BrowserWindow, Menu, Tray, nativeImage, ipcMain, session, net, protocol, shell, dialog } from "electron";
+import { app, BrowserWindow, Menu, Tray, nativeImage, ipcMain, session, net, protocol, shell, dialog, safeStorage, clipboard } from "electron";
 import { existsSync } from "node:fs";
 import { appendFile, mkdir, readdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { execFile, spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { SidecarRpcClient } from "./rpc.mjs";
+import { resourceRequestHeaders } from "./resource-request.mjs";
 import { isSafeResourceId, resourceIdFromRequest } from "./resource-url.mjs";
 import { isSupportedAssociatedFile } from "./file-association.mjs";
 import { accountDataDirectory, accountScopeKey } from "./account-scope.mjs";
 import { rotateDiagnosticLog } from "./diagnostic-log.mjs";
 import { restrictDirectory, restrictFile } from "./file-permissions.mjs";
-import { normalizeStagedResourceInput } from "./staged-resource.mjs";
+import { normalizeStagedResourceInput, remapStagedResourceMetadata } from "./staged-resource.mjs";
 import {
   isMountedDiskImageVolume,
   isMountedInstallerPath,
   mountedInstallerCandidates,
 } from "./installation-location.mjs";
 import { userDataDirectoryFromArguments } from "./user-data-directory.mjs";
+import { isAllowedPrintPreviewUrl } from "./window-open-policy.mjs";
+import { showWindow } from "./window-visibility.mjs";
+import { trayIconPath } from "./tray-icon.mjs";
 import electronUpdater from "electron-updater";
 
 const { autoUpdater } = electronUpdater;
@@ -54,9 +58,11 @@ let sidecarRestartInFlight = false;
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 const windowStatePath = () => join(app.getPath("userData"), "window-state.json");
 const instanceUrlPath = () => join(app.getPath("userData"), "instance-url");
+const sessionTokenPath = () => join(app.getPath("userData"), "session-token");
 const crashMarkerPath = () => join(app.getPath("userData"), "last-session-active");
 const installationMarkerPath = () => join(app.getPath("userData"), "installation-confirmed");
 const logPath = () => join(app.getPath("userData"), "logs", "desktop.log");
+let desktopSessionToken = "";
 const sidecarDataDirectory = (accountId = null) => {
   return accountId
     ? accountDataDirectory(app.getPath("userData"), configuredApiBaseUrl, accountId)
@@ -189,6 +195,29 @@ const loadConfiguredApiBaseUrl = async () => {
   }
 };
 
+const loadDesktopSessionToken = async () => {
+  try {
+    const encrypted = await readFile(sessionTokenPath());
+    desktopSessionToken = safeStorage.decryptString(encrypted);
+  } catch {
+    // Existing installations have no main-process credential until the
+    // renderer migrates the legacy localStorage token after upgrading.
+    desktopSessionToken = "";
+  }
+};
+
+const saveDesktopSessionToken = async (value) => {
+  const normalized = typeof value === "string" ? value.trim() : "";
+  if (normalized.length > 4096) throw new Error("Desktop session token is too long");
+  desktopSessionToken = normalized;
+  const encrypted = safeStorage.encryptString(normalized);
+  const temporaryPath = `${sessionTokenPath()}.tmp`;
+  await writeFile(temporaryPath, encrypted, { mode: 0o600 });
+  await restrictFile(temporaryPath);
+  await rename(temporaryPath, sessionTokenPath());
+  await restrictFile(sessionTokenPath());
+};
+
 const pendingDesktopCommands = [];
 
 const sendDesktopCommand = (command) => {
@@ -287,14 +316,18 @@ const buildApplicationMenu = () => {
 };
 
 const createTray = () => {
-  const iconPath = app.isPackaged
-    ? join(process.resourcesPath, "web", "pwa-192x192.png")
-    : join(projectRoot, "apps/web/public/pwa-192x192.png");
+  const iconPath = trayIconPath({
+    isPackaged: app.isPackaged,
+    platform: process.platform,
+    projectRoot,
+    resourcesPath: process.resourcesPath,
+  });
   const icon = existsSync(iconPath) ? nativeImage.createFromPath(iconPath) : nativeImage.createEmpty();
+  if (process.platform === "darwin") icon.setTemplateImage(true);
   tray = new Tray(icon);
   tray.setToolTip("EdgeEver");
   tray.setContextMenu(Menu.buildFromTemplate([
-    { label: "Show EdgeEver", click: () => { mainWindow?.show(); mainWindow?.focus(); } },
+    { label: "Show EdgeEver", click: () => showWindow(mainWindow) },
     { label: "Sync now", click: () => sendDesktopCommand("sync-now") },
     { label: "Backup now", click: () => sendDesktopCommand("backup-now") },
     ...(updateState === "available" ? [{ label: "Download update", click: () => void autoUpdater.downloadUpdate() }] : []),
@@ -302,7 +335,7 @@ const createTray = () => {
     { type: "separator" },
     { label: "Quit EdgeEver", click: () => { isQuitting = true; app.quit(); } },
   ]));
-  tray.on("double-click", () => { mainWindow?.show(); mainWindow?.focus(); });
+  tray.on("double-click", () => showWindow(mainWindow));
 };
 
 const registerResourceProtocol = () => {
@@ -327,8 +360,8 @@ const registerResourceProtocol = () => {
     const sourceUrl = `${configuredApiBaseUrl}/api/v1/resources/${encodeURIComponent(resourceId)}/blob`;
     try {
       const cookies = await session.defaultSession.cookies.get({ url: sourceUrl });
-      const cookieHeader = cookies.map((cookie) => `${cookie.name}=${cookie.value}`).join("; ");
-      const response = await net.fetch(sourceUrl, cookieHeader ? { headers: { Cookie: cookieHeader } } : undefined);
+      const headers = resourceRequestHeaders({ cookies, sessionToken: desktopSessionToken });
+      const response = await net.fetch(sourceUrl, { headers });
       if (!response.ok) return new Response("Resource request failed", { status: response.status });
       const body = Buffer.from(await response.arrayBuffer());
       await mkdir(directory, { recursive: true });
@@ -484,6 +517,18 @@ const createWindow = async () => {
   }
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith("edgeever-resource://") || url.startsWith("edgeever-staged://")) return { action: "allow" };
+    if (isAllowedPrintPreviewUrl(url, mainWindow.webContents.getURL())) {
+      return {
+        action: "allow",
+        overrideBrowserWindowOptions: {
+          webPreferences: {
+            contextIsolation: true,
+            nodeIntegration: false,
+            sandbox: true,
+          },
+        },
+      };
+    }
     if (url.startsWith("https://") || url.startsWith("http://")) void shell.openExternal(url);
     return { action: "deny" };
   });
@@ -557,12 +602,12 @@ app.whenReady().then(async () => {
     app.quit();
     return;
   }
-  await ejectMountedMacInstallers();
   if (!hasSingleInstanceLock) {
     app.quit();
     return;
   }
   await loadConfiguredApiBaseUrl();
+  await loadDesktopSessionToken();
   app.setAsDefaultProtocolClient("edgeever");
   const previousSessionWasActive = existsSync(crashMarkerPath());
   void writeDiagnostic(previousSessionWasActive ? "session.recovered-after-abnormal-exit" : "session.started");
@@ -597,6 +642,20 @@ app.whenReady().then(async () => {
     flushPendingMarkdownImport();
   });
   ipcMain.on("desktop:api-base-url-sync", (event) => { event.returnValue = configuredApiBaseUrl; });
+  ipcMain.on("desktop:session-token-sync", (event) => { event.returnValue = desktopSessionToken; });
+  ipcMain.handle("desktop:copy-text", (_event, value) => {
+    if (typeof value !== "string") throw new Error("Clipboard value must be a string");
+    clipboard.writeText(value);
+    return clipboard.readText() === value;
+  });
+  ipcMain.handle("desktop:set-session-token", async (_event, value) => {
+    await saveDesktopSessionToken(value);
+    return { stored: Boolean(desktopSessionToken) };
+  });
+  ipcMain.handle("desktop:clear-session-token", async () => {
+    await saveDesktopSessionToken("");
+    return { stored: false };
+  });
   ipcMain.handle("desktop:set-api-base-url", async (_event, value) => {
     const normalized = typeof value === "string" ? value.trim().replace(/\/$/, "") : "";
     if (normalized) {
@@ -643,6 +702,25 @@ app.whenReady().then(async () => {
     }
     return result;
   });
+  ipcMain.handle("desktop:remap-staged-resource-memo-ids", async (_event, mappings) => {
+    if (!Array.isArray(mappings) || mappings.length === 0) return { updated: 0 };
+    const directory = stagedResourceDirectory();
+    try { await mkdir(directory, { recursive: true }); await restrictDirectory(directory); } catch {}
+    const names = await readdir(directory);
+    let updated = 0;
+    for (const name of names.filter((value) => value.endsWith(".json"))) {
+      const metadataPath = join(directory, name);
+      try {
+        const metadata = JSON.parse(await readFile(metadataPath, "utf8"));
+        const remapped = remapStagedResourceMetadata(metadata, mappings);
+        if (remapped === metadata) continue;
+        await writeFile(metadataPath, JSON.stringify(remapped), { mode: 0o600 });
+        await restrictFile(metadataPath);
+        updated += 1;
+      } catch {}
+    }
+    return { updated };
+  });
   ipcMain.handle("desktop:read-staged-resource", async (_event, id) => {
     if (!isSafeResourceId(id)) throw new Error("Invalid staged resource id");
     const directory = stagedResourceDirectory();
@@ -660,11 +738,15 @@ app.whenReady().then(async () => {
   });
 
   await createWindow();
+  // Inspecting and ejecting mounted disk images invokes macOS command-line
+  // tools and may take several seconds. Keep that maintenance off the
+  // user-visible critical path so the first installed launch opens promptly.
+  await ejectMountedMacInstallers();
   await confirmMacInstallation();
   configureAutoUpdater();
   handleOpenTarget(process.argv);
   app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) void createWindow();
+    if (!showWindow(mainWindow)) void createWindow();
   });
 });
 
@@ -674,9 +756,7 @@ app.on("open-file", (event, filePath) => {
 });
 
 app.on("second-instance", (_event, commandLine) => {
-  if (mainWindow?.isMinimized()) mainWindow.restore();
-  mainWindow?.show();
-  mainWindow?.focus();
+  showWindow(mainWindow);
   handleOpenTarget(commandLine);
 });
 

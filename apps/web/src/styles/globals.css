@@ -42,6 +42,8 @@
     --editor-body-font-size: 0.9375rem;
     --editor-body-line-height: 1.6;
     --editor-paragraph-spacing: 0.45rem;
+    --memo-content-divider-color: rgb(var(--brand-green-300-rgb));
+    --memo-content-divider-spacing: 1.5rem;
     --editor-outline-width: 300px;
     --editor-content-max-width: 880px;
 
@@ -159,6 +161,12 @@ body {
   overscroll-behavior-y: auto;
 }
 
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 180ms;
+  animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
 /* Keep the three-pane desktop workspace usable on compact laptop screens.
  * The notebook and memo columns may shrink, while the editor always keeps
  * the remaining width instead of being clipped by fixed tracks.
@@ -205,6 +213,35 @@ textarea {
   min-height: 100%;
   outline: none;
   padding: 8px 12px 56px;
+}
+
+.edgeever-public-share .ProseMirror {
+  min-height: 0;
+  padding: 8px 20px 40px;
+  color: #0f172a;
+}
+
+.edgeever-public-share .ProseMirror [data-edgeever-theme-block] {
+  margin: 1.25rem 0;
+  border: 1px solid #dbeee5;
+  border-radius: 6px;
+  background: #fbfefc;
+  padding: 0.8rem 1rem;
+}
+
+.edgeever-public-share .ProseMirror [data-theme-block-kind="chapter"] {
+  border-left: 4px solid var(--brand-green);
+  background: var(--brand-green-soft);
+}
+
+:root.dark .edgeever-public-share .ProseMirror {
+  color: #0f172a;
+}
+
+@media (min-width: 640px) {
+  .edgeever-public-share .ProseMirror {
+    padding-inline: 36px;
+  }
 }
 
 .ProseMirror .edgeever-search-match {
@@ -447,15 +484,74 @@ textarea {
   background: transparent;
 }
 
+.ProseMirror .edgeever-mermaid-toolbar {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  z-index: 2;
+  display: flex;
+  gap: 0.25rem;
+  padding: 0.25rem;
+  border: 1px solid #d9e2dc;
+  border-radius: 7px;
+  background: rgb(255 255 255 / 0.94);
+  box-shadow: 0 1px 3px rgb(15 23 42 / 0.08);
+  backdrop-filter: blur(6px);
+}
+
+.ProseMirror .edgeever-mermaid-tool-button {
+  display: inline-flex;
+  width: 2rem;
+  height: 2rem;
+  flex: 0 0 2rem;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #475569;
+  cursor: pointer;
+}
+
+.ProseMirror .edgeever-mermaid-tool-button svg {
+  width: 1rem;
+  height: 1rem;
+  stroke-width: 2;
+}
+
+.ProseMirror .edgeever-mermaid-tool-button:hover,
+.ProseMirror .edgeever-mermaid-tool-button:focus-visible,
+.ProseMirror .edgeever-mermaid-tool-button[aria-pressed="true"] {
+  background: #eaf5ee;
+  color: #0f766e;
+  outline: none;
+}
+
+.ProseMirror .edgeever-mermaid-tool-button:focus-visible {
+  box-shadow: 0 0 0 2px #ffffff, 0 0 0 4px #0f766e;
+}
+
+.ProseMirror .edgeever-mermaid-tool-button[data-state="copied"] {
+  color: #15803d;
+}
+
+.ProseMirror .edgeever-mermaid-tool-button[data-state="error"] {
+  color: #be123c;
+}
+
 .ProseMirror .edgeever-mermaid-preview {
   display: flex;
+  max-height: min(70vh, 44rem);
   min-height: 6rem;
   align-items: center;
   justify-content: center;
-  overflow-x: auto;
-  padding: 1.25rem 0.5rem;
-  background: transparent;
-  cursor: pointer;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 3.25rem 1rem 1rem;
+  border: 1px solid #d9e2dc;
+  border-radius: 8px;
+  background: #fbfdfb;
+  scrollbar-color: rgb(100 116 139 / 0.35) transparent;
 }
 
 .ProseMirror .edgeever-mermaid-message,
@@ -472,15 +568,17 @@ textarea {
 .ProseMirror .edgeever-mermaid-svg {
   display: flex;
   width: 100%;
+  min-width: 0;
+  align-self: flex-start;
   justify-content: center;
 }
 
 .ProseMirror .edgeever-mermaid-svg svg {
   display: block;
-  width: auto;
+  width: 100%;
   max-width: 100%;
   height: auto;
-  max-height: 30rem;
+  max-height: none;
 }
 
 .ProseMirror .edgeever-mermaid-source {
@@ -498,9 +596,9 @@ textarea {
 }
 
 .ProseMirror hr {
-  margin: 1.5rem 0;
+  margin: var(--memo-content-divider-spacing) 0;
   border: 0;
-  border-top: 1px solid rgb(var(--brand-green-300-rgb));
+  border-top: 1px solid var(--memo-content-divider-color);
 }
 
 .ProseMirror img {
@@ -1037,6 +1135,27 @@ textarea {
   background: transparent;
 }
 
+:root.dark .ProseMirror .edgeever-mermaid-toolbar {
+  border-color: #334155;
+  background: rgb(15 23 42 / 0.94);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.28);
+}
+
+:root.dark .ProseMirror .edgeever-mermaid-tool-button {
+  color: #cbd5e1;
+}
+
+:root.dark .ProseMirror .edgeever-mermaid-tool-button:hover,
+:root.dark .ProseMirror .edgeever-mermaid-tool-button:focus-visible,
+:root.dark .ProseMirror .edgeever-mermaid-tool-button[aria-pressed="true"] {
+  background: #1e3a2a;
+  color: #5eead4;
+}
+
+:root.dark .ProseMirror .edgeever-mermaid-tool-button:focus-visible {
+  box-shadow: 0 0 0 2px #0f172a, 0 0 0 4px #5eead4;
+}
+
 :root.dark .ProseMirror .edgeever-code-source {
   border-color: #166534;
   background: #13261a;
@@ -1044,7 +1163,8 @@ textarea {
 }
 
 :root.dark .ProseMirror .edgeever-mermaid-preview {
-  background: transparent;
+  border-color: #334155;
+  background: #0f172a;
 }
 
 :root.dark .markdown-content {
@@ -1066,6 +1186,97 @@ textarea {
   background-color: #13261a;
   border-color: #166534;
   color: #cbd5e1;
+}
+
+.edgeever-mermaid-viewer .yarl__toolbar {
+  top: max(0.5rem, env(safe-area-inset-top));
+  right: max(0.5rem, env(safe-area-inset-right));
+  gap: 0.25rem;
+  padding: 0.25rem;
+  border: 1px solid rgb(255 255 255 / 0.18);
+  border-radius: 8px;
+  background: rgb(15 23 42 / 0.88);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.24);
+  backdrop-filter: blur(8px);
+}
+
+.edgeever-mermaid-viewer .yarl__button,
+.edgeever-mermaid-viewer-reset {
+  display: inline-flex;
+  width: 2.75rem;
+  height: 2.75rem;
+  padding: 0;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #f8fafc;
+  filter: none;
+  cursor: pointer;
+}
+
+.edgeever-mermaid-viewer .yarl__button:hover,
+.edgeever-mermaid-viewer .yarl__button:focus-visible,
+.edgeever-mermaid-viewer-reset:hover,
+.edgeever-mermaid-viewer-reset:focus-visible {
+  background: rgb(255 255 255 / 0.14);
+  outline: none;
+}
+
+.edgeever-mermaid-viewer .yarl__button:focus-visible,
+.edgeever-mermaid-viewer-reset:focus-visible {
+  box-shadow: inset 0 0 0 2px #5eead4;
+}
+
+.edgeever-mermaid-viewer-reset:disabled {
+  opacity: 0.38;
+  cursor: default;
+}
+
+.edgeever-mermaid-viewer-reset svg {
+  width: 1.5rem;
+  height: 1.5rem;
+}
+
+.edgeever-mermaid-viewer .yarl__slide_image {
+  user-select: none;
+}
+
+.edgeever-mermaid-viewer .yarl__slide_wrapper_interactive {
+  cursor: grab;
+}
+
+.edgeever-mermaid-viewer .yarl__slide_wrapper_interactive:active {
+  cursor: grabbing;
+}
+
+@media (pointer: coarse) {
+  .ProseMirror .edgeever-mermaid-tool-button {
+    width: 2.75rem;
+    height: 2.75rem;
+    flex-basis: 2.75rem;
+  }
+
+  .ProseMirror .edgeever-mermaid-preview {
+    padding-top: 4rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation-duration: 0.01ms !important;
+  }
 }
 
 :root.dark .markdown-content code {

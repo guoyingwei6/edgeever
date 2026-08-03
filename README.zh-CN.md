@@ -43,12 +43,13 @@ EdgeEver 是一款现代化的开源笔记工作区。它为你找回经典印�
 - **优雅的双视图编辑**：桌面端支持在富文本与 Markdown 源码视图之间自由切换。
 - **Mermaid 架构图与流程图渲染**：原生支持 Mermaid 代码块渲染，视图切换时完整保留可编辑源码，让绘制逻辑图表更直观。
 - **笔记历史版本回溯**：自动记录修改历史，随时查阅与还原过往版本。
+- **可撤销的只读分享**：为任意笔记创建难以猜测的公开链接，他人无需登录即可查看最新保存的正文与附件，并可随时取消分享。
 - **智能前端图片压缩**：图片上传前在浏览器端静默完成压缩，常见截图与大图精简 50%-90% 体积，加载更迅速、存储更省心。
 - **通用文件附件支持**：支持轻松上传并插入 PDF、Office 文档、压缩包及音视频等各种附件。
 - **高效多选与批量操作**：支持笔记批量合并、批量移动，以及笔记本拖拽排序与层级调整。
 - **离线草稿与同步队列**：网络不稳定时自动保存离线草稿，恢复连线后自动入队同步。
 - **多账号与个人空间隔离**：单实例支持创建多个独立账号，用户数据相互隔离，配备直观的管理员账号管理与安全加密机制。
-- **全平台多端覆盖**：已上架 Chrome/Edge 网页裁剪插件；支持安装为 PWA 应用；原生 Android App 已上架 [Google Play](https://play.google.com/store/apps/details?id=org.edgeever.mobile)，也可从 GitHub Releases 下载 APK；iOS App 当前仍在 App Store 审核中；原生桌面端计划基于 Electron + Rust Sidecar 构建。
+- **全平台多端覆盖**：网页裁剪插件已分别上架 Chrome Web Store（Chrome/Edge）与 Firefox Add-ons（Firefox）；支持安装为 PWA 应用；原生 Android App 已上架 [Google Play](https://play.google.com/store/apps/details?id=org.edgeever.mobile)，也可从 GitHub Releases 下载 APK；iOS App 当前仍在 App Store 审核中；原生桌面端支持 Apple Silicon 和 Intel Mac。
 
 ## 部署
 
@@ -82,6 +83,10 @@ EdgeEver 采用纯 Serverless 架构，完全运行在 Cloudflare 免费配额�
 
 > 📖 包含具体参数与构建命令的详细步骤，请查看 [在线部署完整文档](docs/deploy-cloudflare-button.zh-CN.md)。
 
+---
+
+> 💡 **部署提示（Cloudflare R2 绑定）**：虽然 Cloudflare R2 存储提供了足够慷慨、在笔记场景中几乎永远不会超量的免费额度，但开通时仍需绑定支付方式（双币信用卡）。根据个人经验，在国内 VISA 信用卡中，招商和浦发的验证与开通最快捷，且这类卡片大多免年费（或极易通过刷卡免年费），无需担心持有成本。
+
 ## 多账号登录
 
 部署完成后，单个实例支持多账号登录。
@@ -97,17 +102,20 @@ PC 端请使用 Chrome/Edge 打开站点，点击地址栏右侧的“安装”�
 
 > 常见踩坑：移动端安装 PWA 时，建议优先使用 Chrome 或 Edge。其他移动浏览器在安装过程中可能出现兼容性问题或异常报错。
 
-## Chrome/Edge 网页裁剪插件
+## 浏览器网页裁剪插件
 
-Chrome/Edge 网页裁剪插件已正式上架，您可以通过以下链接直接安装使用（Edge 浏览器亦可直接在 Chrome 应用商店中安装）：
+网页裁剪插件已在 Chrome、Microsoft Edge 与 Firefox 正式上架。请从对应的浏览器商店安装（Edge 浏览器亦可直接安装 Chrome Web Store 版本）：
 
 - [Chrome Web Store 安装地址](https://chromewebstore.google.com/detail/edgeever-web-clipper/gjadpfmanienmlofajibkfkkpfdkclgo)
+- [Firefox Add-ons 安装地址](https://addons.mozilla.org/zh-CN/firefox/addon/edgeever-web-clipper/)
+
+开发者也可参考[扩展开发说明](apps/extension/README.md)从源码构建并加载插件。
 
 ## 关于客户端
 
 Android App 现已上架 [Google Play](https://play.google.com/store/apps/details?id=org.edgeever.mobile)，也可从 [GitHub Releases](https://github.com/tianma-if/edgeever/releases) 下载签名 APK。iOS App 已提交，目前仍在 App Store 审核中。
 
-原生桌面端 App 计划基于 Electron + Rust Sidecar 构建。
+macOS App 可从 [GitHub Releases](https://github.com/tianma-if/edgeever/releases) 下载，同时支持 Apple Silicon 和 Intel Mac。Windows 版本正在处理代码签名证书问题，解决后即可发布。
 
 ## 技术栈
 
@@ -116,7 +124,8 @@ Android App 现已上架 [Google Play](https://play.google.com/store/apps/detail
 - 前端：Vite、React、React Router、TanStack Query，UI 基于 Tailwind CSS、shadcn/ui、Radix UI。
 - 编辑器：TipTap / ProseMirror，支持 Markdown；PWA 使用 vite-plugin-pwa、Workbox、Dexie。
 - 移动 App：Expo + React Native，采用 SQLite 本地存储与增量同步。
-- 网页裁剪：Manifest V3、Mozilla Readability、Turndown，支持 Chrome 与 Microsoft Edge。
+- 原生桌面端：Electron + Rust sidecar，兼顾跨平台一致体验与高性能本地数据服务；基于 SQLite 支持离线编辑、联网后增量同步与本地备份。
+- 网页裁剪：Manifest V3、Mozilla Readability、Turndown，支持 Chrome、Microsoft Edge 与 Firefox。
 - 后端：Cloudflare Workers、Hono、Zod、D1、R2，提供 REST API、OpenAPI 与 Remote MCP。
 
 ## 快速开始
@@ -156,7 +165,7 @@ bun run build
 
 ```text
 apps/web          Vite + React 前端、PWA、离线草稿与同步队列
-apps/extension    Chrome/Edge Manifest V3 网页裁剪插件
+apps/extension    Chrome/Edge/Firefox Manifest V3 网页裁剪插件
 apps/api          Cloudflare Worker + Hono API、OpenAPI、MCP endpoint
 apps/mobile       Expo + React Native 移动端 App
 apps/desktop      Electron 桌面端壳层、preload bridge 与原生打包配置
@@ -196,8 +205,8 @@ https://你的域名/api/openapi.json
 
 ## MCP
 
-先在 EdgeEver 左下角 **个人中心** 的 **MCP 设置** 里创建 API Token，然后复制API Token或者复制整个MCP配置，发送给AI Agent，让他安装此MCP。
-然后即可授权AI Agent读取和整理笔记。
+先在 EdgeEver 左下角 **个人中心** 的 **MCP 设置** 中创建 API Token，再将 Token 或完整 MCP 配置发送给 AI Agent。连接后，Agent 即可在你的授权范围内安全地读取、整理和导入笔记；重复执行同一导入任务也不会创建重复笔记。
+
 > 放飞你的思路，这种情况下是有很多灵活玩法：
 比如让AI Agent归纳你随机记录的灵感创意、针对你的笔记做精准的人物画像、构建自己的知识图谱、自动为笔记打标签）
 借助 MCP，EdgeEver 还可以与 Notion Database、飞书多维表格等工具联动，把日常笔记中零散的灵感、信息和素材沉淀到结构化数据库中，方便后续整理、检索与管理。
@@ -236,7 +245,6 @@ Cloudflare Worker 侧执行图片处理会消耗计算/图片处理额度，因�
 
 ## 致谢
 
-- 编辑器主题的视觉设计参考自 [gzh-design-skill](https://github.com/isjiamu/gzh-design-skill)。
 - “minimal品牌绿”主题排版架构借鉴于 [obsidian-minimal](https://github.com/kepano/obsidian-minimal)。
 - “Outline 品牌绿”主题排版架构借鉴于 [Outline](https://github.com/outline/outline)。
 

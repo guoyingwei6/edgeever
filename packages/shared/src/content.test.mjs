@@ -1,5 +1,19 @@
 import { describe, expect, test } from "bun:test";
-import { countMemoCharacters, docToMarkdown, markdownToDoc, resolveMemoContentDoc } from "./content.ts";
+import { countMemoCharacters, docToMarkdown, docToText, markdownToDoc, resolveMemoContentDoc, resolveMemoContentMarkdown, resolveMergedMemoTitle } from "./content.ts";
+
+describe("merged memo title", () => {
+  test("prefers an explicit title, then the first custom source title", () => {
+    const sources = [{ title: "无标题笔记" }, { title: "  手动标题  " }, { title: "另一个标题" }];
+
+    expect(resolveMergedMemoTitle("  指定标题  ", sources)).toBe("指定标题");
+    expect(resolveMergedMemoTitle(undefined, sources)).toBe("手动标题");
+  });
+
+  test("uses a dated merge title when every source is untitled", () => {
+    expect(resolveMergedMemoTitle(undefined, [{ title: null }, { title: "无标题笔记" }], new Date(2026, 7, 2)))
+      .toBe("合并笔记 2026/8/2");
+  });
+});
 
 describe("memo character count", () => {
   test("counts punctuation while excluding whitespace and formatting", () => {
@@ -56,6 +70,21 @@ describe("Markdown table conversion", () => {
 
     expect(resolveMemoContentDoc(legacyDoc, markdown).content[0]?.type).toBe("table");
     expect(resolveMemoContentDoc(legacyDoc, "Legacy note")).toBe(legacyDoc);
+  });
+});
+
+describe("legacy Markdown body recovery", () => {
+  test("recovers a body when the stored JSON document is empty", () => {
+    const markdown = "权威和反中心化特征，即当一个人成为某种代表性的符号之后";
+    const resolved = resolveMemoContentDoc(markdownToDoc(""), markdown);
+
+    expect(docToText(resolved)).toContain(markdown);
+  });
+
+  test("recovers Markdown from rich content when the compatibility copy is empty", () => {
+    const richContent = markdownToDoc("这段正文只保存在富文本 JSON 中。");
+
+    expect(resolveMemoContentMarkdown(richContent, "")).toContain("这段正文只保存在富文本 JSON 中。");
   });
 });
 
