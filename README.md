@@ -95,13 +95,6 @@ Once deployed, a single instance supports multi-account login.
 
 The instance administrator can create, disable, or reset member accounts in **Profile** -> **User accounts**. Each member gets a fully isolated personal workspace, including notebooks, notes, attachments, Trash, import/export, and MCP tokens.
 
-
-## PWA Installation
-
-EdgeEver can be installed as a PWA on desktop or mobile home screens. On desktop, open the site in Chrome or Edge and use the install icon in the address bar. On Android, open it in Chrome, use the three-dot menu, and choose **Add to Home screen** or **Install**. Avoid installing from embedded browsers such as WeChat.
-
-> Common pitfall: When installing the PWA on mobile, Chrome or Edge is recommended. Other mobile browsers may encounter compatibility issues or unexpected errors during installation.
-
 ## Browser Web Clipper
 
 The Web Clipper is officially published for Chrome, Microsoft Edge, and Firefox. Install it from the store for your browser (Microsoft Edge users can install the Chrome Web Store version directly):
@@ -113,9 +106,17 @@ Developers can also use the [extension development guide](apps/extension/README.
 
 ## Native Clients
 
+Native clients offer a smoother, more reliable experience with deeper system integration, local storage, and offline editing. Changes sync incrementally when connectivity returns, making them ideal for frequent use and unreliable network conditions.
+
 The Android app is now available on [Google Play](https://play.google.com/store/apps/details?id=org.edgeever.mobile), with signed APKs also available from [GitHub Releases](https://github.com/tianma-if/edgeever/releases). The iOS app has been submitted and is currently under App Store review.
 
-The macOS app is available from [GitHub Releases](https://github.com/tianma-if/edgeever/releases) for both Apple Silicon and Intel Macs. The Windows version will be released once the code-signing certificate issue is resolved.
+The macOS app is available from [GitHub Releases](https://github.com/tianma-if/edgeever/releases). The Windows version will be released once the code-signing certificate issue is resolved.
+
+On platforms without a native client, EdgeEver can be installed as a PWA using Chrome or Edge.
+
+## Community and Feedback
+
+- Bugs, feature requests, and deployment issues: [GitHub Issues](https://github.com/tianma-if/edgeever/issues)
 
 ## Tech Stack
 
@@ -223,10 +224,6 @@ If you want to migrate notes from other platforms to EdgeEver, please refer to t
 - **flomo Migration**: Please refer to [docs/flomo-migration-guide.md](docs/flomo-migration-guide.md)
 - **Memos Migration**: Please refer to [docs/memos-migration-guide.md](docs/memos-migration-guide.md)
 - **Notion Migration**: Please refer to [docs/notion-migration-guide.md](docs/notion-migration-guide.md)
-
-## Community and Feedback
-
-- Bugs, feature requests, and deployment issues: [GitHub Issues](https://github.com/tianma-if/edgeever/issues)
 
 ## Docker Deployment Roadmap
 
