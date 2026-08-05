@@ -28,7 +28,7 @@ Many long-time **Evernote** users simply want a **reliable, open, and fast** per
 
 - Demo: [https://demo.edgeever.org](https://demo.edgeever.org)
 
-The public demo resets every Monday at 1:00 AM (China Standard Time) and restores sample notes. Do not store private content there.
+The public demo resets every day at 3:00 AM (China Standard Time) and restores sample notes. Do not store private content there.
 
 ## Features
 
@@ -215,6 +215,12 @@ With MCP, EdgeEver can also connect to tools such as Notion databases and Feishu
 Image compression happens in the Web client before upload and is controlled by the **Compress note images** setting. When enabled, PNG, JPEG, WebP, and AVIF files are converted to WebP when beneficial, with the longest edge limited to `2560px`. If compression does not reduce size, the original file is kept.
 
 EdgeEver avoids Worker-side image processing to reduce compute and image-processing quota usage. REST API and MCP upload paths store the file content provided by the client without additional server-side compression.
+
+## Advanced Object Storage
+
+The instance owner can open **Settings → Advanced → OSS object storage** to send new images and attachments to an S3-compatible service such as Alibaba Cloud OSS, Tencent COS, AWS S3, MinIO, or R2. Existing resources stay in their original store, so changing the default does not migrate or break historical attachments.
+
+Before saving third-party credentials on a Cloudflare deployment, configure the `EDGE_EVER_STORAGE_ENCRYPTION_KEY` Worker Secret with a random value of at least 32 characters. EdgeEver uses this instance-level key to encrypt the access secret stored in D1. Keep the key stable and backed up; it is required to read resources that use the external store.
 
 ## Migration
 
