@@ -9,18 +9,20 @@ import {
   Strikethrough,
   Code2,
   List,
+  ListTodo,
   ListOrdered,
   Quote,
   SquareCode,
   ChartNoAxesCombined,
   Minus,
   Paperclip,
+  Link,
   Link2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { getActiveBlockValue } from "@/lib/app-helpers";
+import { formatShortcutBinding, getActiveBlockValue, type ShortcutBinding } from "@/lib/app-helpers";
 import { CODE_BLOCK_LANGUAGES, getCodeBlockLanguageValue } from "@/lib/code-block";
 import { EditorTableMenu } from "@/components/EditorTableMenu";
 
@@ -116,17 +118,25 @@ export const EditorToolbar = ({
   readOnly,
   markdownMode = false,
   onMarkdownModeChange,
+  markdownModeShortcut,
   onPickAttachment,
+  onPickExternalLink,
   onPickNoteLink,
+  externalLinkActive = false,
 }: {
   editor: Editor | null;
   readOnly: boolean;
   markdownMode?: boolean;
   onMarkdownModeChange?: () => void;
+  markdownModeShortcut?: ShortcutBinding;
   onPickAttachment?: () => void;
+  /** Insert or edit an external hyperlink (not a note reference). */
+  onPickExternalLink?: () => void;
   onPickNoteLink?: () => void;
+  externalLinkActive?: boolean;
 }) => {
   const { t } = useTranslation();
+  const markdownModeShortcutLabel = markdownModeShortcut ? formatShortcutBinding(markdownModeShortcut) : null;
   const editorReady = isToolbarEditorReady(editor);
   const disabled = readOnly || !editorReady;
   const blockValue = getActiveBlockValue(editor);
@@ -208,23 +218,34 @@ export const EditorToolbar = ({
         >
           {onMarkdownModeChange && (
             <>
-              <button
-                className={cn(
-                  "flex h-8 shrink-0 items-center rounded-md border px-2.5 text-xs font-medium transition disabled:pointer-events-none disabled:opacity-40",
-                  markdownMode
-                    ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-                    : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-                )}
-                type="button"
-                title={markdownMode ? t("editorToolbar.richText") : t("editorToolbar.markdown")}
-                aria-label={markdownMode ? t("editorToolbar.richText") : t("editorToolbar.markdown")}
-                aria-pressed={markdownMode}
-                disabled={readOnly}
-                onMouseDown={(event) => event.preventDefault()}
-                onClick={onMarkdownModeChange}
-              >
-                {markdownMode ? t("editorToolbar.switchToRichText") : t("editorToolbar.switchToMarkdown")}
-              </button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    className={cn(
+                      "flex h-8 shrink-0 items-center rounded-md border px-2.5 text-xs font-medium transition disabled:pointer-events-none disabled:opacity-40",
+                      markdownMode
+                        ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                        : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                    )}
+                    type="button"
+                    aria-label={markdownMode ? t("editorToolbar.richText") : t("editorToolbar.markdown")}
+                    aria-pressed={markdownMode}
+                    disabled={readOnly}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={onMarkdownModeChange}
+                  >
+                    {markdownMode ? t("editorToolbar.switchToRichText") : t("editorToolbar.switchToMarkdown")}
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" className="flex items-center gap-2">
+                  <span>{markdownMode ? t("editorToolbar.richText") : t("editorToolbar.markdown")}</span>
+                  {markdownModeShortcutLabel && (
+                    <kbd className="rounded border border-white/20 bg-white/10 px-1.5 py-0.5 font-mono text-[10px] leading-none">
+                      {markdownModeShortcutLabel}
+                    </kbd>
+                  )}
+                </TooltipContent>
+              </Tooltip>
               <ToolbarDivider />
             </>
           )}
@@ -236,6 +257,23 @@ export const EditorToolbar = ({
                 onClick={onPickAttachment}
               >
                 <Paperclip className="h-4 w-4" />
+              </EditorToolbarButton>
+              <ToolbarDivider />
+            </>
+          )}
+          {onPickExternalLink && (
+            <>
+              <EditorToolbarButton
+                title={
+                  externalLinkActive
+                    ? t("editorToolbar.externalLinkEdit")
+                    : t("editorToolbar.externalLinkShortcut")
+                }
+                active={externalLinkActive}
+                disabled={readOnly}
+                onClick={onPickExternalLink}
+              >
+                <Link className="h-4 w-4" />
               </EditorToolbarButton>
               <ToolbarDivider />
             </>
@@ -330,6 +368,14 @@ export const EditorToolbar = ({
             onClick={() => run((current) => current.chain().focus().toggleBulletList().run())}
           >
             <List className="h-4 w-4" />
+          </EditorToolbarButton>
+          <EditorToolbarButton
+            title={`${t("editorToolbar.taskList")} · ${t("editorToolbar.listIndentHint")}`}
+            active={isActive("taskList")}
+            disabled={!canRun((current) => current.can().chain().focus().toggleTaskList().run())}
+            onClick={() => run((current) => current.chain().focus().toggleTaskList().run())}
+          >
+            <ListTodo className="h-4 w-4" />
           </EditorToolbarButton>
           <EditorToolbarButton
             title={`${t("editorToolbar.orderedList")} · ${t("editorToolbar.listIndentHint")}`}

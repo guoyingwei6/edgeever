@@ -5,12 +5,19 @@ import { BrowserRouter } from "react-router";
 import { registerSW } from "virtual:pwa-register";
 import { App } from "./app/App";
 import "./i18n";
-import { emitPwaUpdateNotice, markPwaUpdateReloadPending } from "./lib/pwa-update-notice";
+import { emitPwaUpdateNotice } from "./lib/pwa-update-notice";
 import { initializeTheme, ThemeProvider } from "./components/ThemeProvider";
+import { DesktopRendererErrorBoundary } from "./components/DesktopRendererErrorBoundary";
 import "./styles/globals.css";
 
 const PWA_UPDATE_CHECK_INTERVAL_MS = 10 * 60 * 1_000;
 const DEVELOPMENT_PWA_RELOAD_KEY = "edgeever.dev-pwa-reset";
+
+if (import.meta.env.DEV && __EDGEEVER_DEVELOPMENT_PROFILE__) {
+  document.documentElement.dataset.edgeeverEnvironment = __EDGEEVER_DEVELOPMENT_PROFILE__;
+  const environmentLabel = __EDGEEVER_DEVELOPMENT_PROFILE__ === "demo" ? "LOCAL DEMO" : "LOCAL";
+  document.title = `[${environmentLabel}] ${document.title}`;
+}
 
 const clearDevelopmentPwaState = async () => {
   if (!("serviceWorker" in navigator)) {
@@ -49,11 +56,10 @@ const registerProductionServiceWorker = () => {
   updateServiceWorker = registerSW({
     immediate: true,
     onNeedRefresh() {
-      emitPwaUpdateNotice({ buildLabel: __EDGEEVER_BUILD_LABEL__, kind: "checking" });
+      emitPwaUpdateNotice({ kind: "checking" });
       void updateServiceWorker(true);
     },
     onNeedReload() {
-      markPwaUpdateReloadPending();
       window.location.reload();
     },
     onRegisteredSW(_swScriptUrl, registration) {
@@ -96,15 +102,21 @@ const mountApp = () => {
 
   initializeTheme();
 
-  createRoot(root).render(
+  createRoot(root, {
+    onUncaughtError(error, errorInfo) {
+      console.error("Uncaught React error", error, errorInfo.componentStack);
+    },
+  }).render(
     <React.StrictMode>
-      <QueryClientProvider client={queryClient}>
-        <ThemeProvider>
-          <BrowserRouter>
-            <App />
-          </BrowserRouter>
-        </ThemeProvider>
-      </QueryClientProvider>
+      <DesktopRendererErrorBoundary>
+        <QueryClientProvider client={queryClient}>
+          <ThemeProvider>
+            <BrowserRouter>
+              <App />
+            </BrowserRouter>
+          </ThemeProvider>
+        </QueryClientProvider>
+      </DesktopRendererErrorBoundary>
     </React.StrictMode>
   );
 };

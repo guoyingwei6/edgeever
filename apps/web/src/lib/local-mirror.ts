@@ -1,14 +1,16 @@
-import { createExcerpt, docToMarkdown, docToText, markdownToDoc, resolveMemoContentMarkdown, resolveMergedMemoTitle, type MemoDetail, type MemoRevision, type MemoSummary, type MemoTemplate, type Notebook, type ResourceListItem, type TagSummary, type TiptapDoc } from "@edgeever/shared";
+import { createExcerpt, docToMarkdown, docToText, markdownToDoc, mergeMemoDocs, resolveMemoContentDoc, resolveMergedMemoTitle, type MemoDetail, type MemoRevision, type MemoSummary, type MemoTemplate, type Notebook, type ResourceListItem, type TagSummary, type TiptapDoc } from "@edgeever/shared";
 import type { MemoFilterMode, MemoSortMode } from "@/lib/app-helpers";
 import { api, type SyncChangesResponse } from "@/lib/api";
-import { localDb, type LocalMemo, type LocalNotebook, type LocalResource, type LocalRevision } from "@/lib/local-db";
+import { localDb, selectNewestLocalDraft, type LocalDraft, type LocalMemo, type LocalNotebook, type LocalResource, type LocalRevision } from "@/lib/local-db";
 import { cacheLocalResourceBytes, localResourceUrl, removeCachedLocalResourceBytes } from "@/lib/local-resource-cache";
 import { isBrowserOffline } from "@/lib/network-status";
+import { parseTagsText } from "@/lib/utils";
 
 export type LocalMemoListParams = {
   notebookId?: string | null;
   notebookIds?: string[];
   q?: string;
+  tag?: string;
   trash?: boolean;
   sort?: MemoSortMode;
   filter?: MemoFilterMode;
@@ -33,6 +35,9 @@ export const createLocalDataScope = (baseUrl: string, userId?: string | null) =>
 
 const getMeta = async (scope: string, key: string) =>
   (await localDb.syncMeta.get([scope, key]))?.value ?? null;
+
+export const hasLocalSyncCursorRewound = (localCursor: number, serverCursor?: number) =>
+  typeof serverCursor === "number" && Number.isFinite(serverCursor) && serverCursor < localCursor;
 
 export const isLocalMirrorInitialized = async (scope: string) => Boolean(await getMeta(scope, SYNC_IDENTITY_KEY));
 
@@ -140,7 +145,15 @@ const performSyncLocalMirror = async (scope: string) => {
   let currentCursor = cursor;
   let response = await api.syncChanges({ cursor: currentCursor, limit: CHANGE_PAGE_SIZE });
 
-  if (response.syncIdentity && response.syncIdentity !== storedIdentity) {
+  if (
+    hasLocalSyncCursorRewound(currentCursor, response.serverCursor) ||
+    (response.syncIdentity && response.syncIdentity !== storedIdentity)
+  ) {
+    // Restoring or clearing a server database can restart the change-log
+    // sequence without replacing the workspace row. In that case the saved
+    // browser cursor is ahead of the server and an incremental request looks
+    // empty even though the IndexedDB mirror is stale. Rebuild from the
+    // authoritative snapshot just as we do for a changed sync identity.
     changed = await bootstrapScope(scope);
     return { bootstrapped: true, changed };
   }
@@ -202,10 +215,12 @@ export const listLocalMemos = async (scope: string, params: LocalMemoListParams)
   let memos = await localDb.memos.where("scope").equals(scope).toArray();
   const notebookIds = params.notebookIds ?? (params.notebookId ? [params.notebookId] : null);
   const q = params.q?.trim().toLocaleLowerCase();
+  const tag = params.tag?.trim().toLocaleLowerCase();
 
   memos = memos.filter((memo) => {
     if (memo.isDeleted !== Boolean(params.trash)) return false;
     if (notebookIds?.length && !notebookIds.includes(memo.notebookId)) return false;
+    if (tag && !memo.tags.some((memoTag) => memoTag.toLocaleLowerCase() === tag)) return false;
     if (params.filter === "tagged" && memo.tags.length === 0) return false;
     if (params.filter === "untagged" && memo.tags.length > 0) return false;
     if (params.filter === "pinned" && !memo.isPinned) return false;
@@ -245,11 +260,19 @@ export const isLocalMemoId = (memoId: string) => memoId.startsWith("local_");
 
 export const createLocalMemo = async (
   scope: string,
-  input: { notebookId: string; title?: string; contentMarkdown?: string; tags?: string[]; createdAt?: string; updatedAt?: string },
+  input: {
+    notebookId: string;
+    title?: string;
+    contentMarkdown?: string;
+    contentJson?: TiptapDoc;
+    tags?: string[];
+    createdAt?: string;
+    updatedAt?: string;
+  },
 ) => {
   const now = new Date().toISOString();
-  const contentMarkdown = input.contentMarkdown ?? "";
-  const contentJson = markdownToDoc(contentMarkdown);
+  const contentJson = input.contentJson ?? markdownToDoc(input.contentMarkdown ?? "");
+  const contentMarkdown = input.contentMarkdown ?? docToMarkdown(contentJson);
   const contentText = docToText(contentJson);
   const memo: MemoDetail = {
     id: `local_${crypto.randomUUID()}`,
@@ -276,16 +299,75 @@ export const createLocalMemo = async (
   return memo;
 };
 
+const draftTimestamp = (draft: LocalDraft | null | undefined) => {
+  const timestamp = draft ? Date.parse(draft.updatedAt) : Number.NaN;
+  return Number.isFinite(timestamp) ? timestamp : 0;
+};
+
+export const remapLocalDraftMemoId = async (temporaryId: string, remoteId: string) => {
+  if (temporaryId === remoteId) return;
+  await localDb.transaction("rw", localDb.drafts, async () => {
+    const temporaryDraft = await localDb.drafts.get(temporaryId);
+    if (!temporaryDraft) return;
+    const remoteDraft = await localDb.drafts.get(remoteId);
+    const newestDraft = selectNewestLocalDraft(temporaryDraft, remoteDraft);
+    if (newestDraft) {
+      await localDb.drafts.put({ ...newestDraft, memoId: remoteId });
+    }
+    await localDb.drafts.delete(temporaryId);
+  });
+};
+
 export const replaceLocalMemoId = async (scope: string, temporaryId: string, memo: MemoDetail) => {
-  await localDb.transaction("rw", [localDb.memos, localDb.idMappings], async () => {
-    await localDb.memos.put({ ...memo, scope });
+  return localDb.transaction("rw", [localDb.memos, localDb.idMappings, localDb.drafts], async () => {
+    const [temporaryMemo, temporaryDraft, remoteDraft] = await Promise.all([
+      localDb.memos.get([scope, temporaryId]),
+      localDb.drafts.get(temporaryId),
+      localDb.drafts.get(memo.id),
+    ]);
+    const draft = selectNewestLocalDraft(temporaryDraft, remoteDraft);
+    const localIsNewer = Boolean(temporaryMemo && Date.parse(temporaryMemo.updatedAt) > Date.parse(memo.updatedAt));
+    const draftIsNewer = Boolean(draft && draftTimestamp(draft) >= Date.parse(memo.updatedAt));
+    const contentSource = draftIsNewer && draft
+      ? {
+          title: draft.title.trim() || null,
+          tags: parseTagsText(draft.tagsText),
+          contentJson: draft.contentJson,
+          contentMarkdown: docToMarkdown(draft.contentJson),
+          contentText: docToText(draft.contentJson),
+          updatedAt: draft.updatedAt,
+        }
+      : localIsNewer && temporaryMemo
+        ? {
+            title: temporaryMemo.title,
+            tags: temporaryMemo.tags,
+            contentJson: temporaryMemo.contentJson,
+            contentMarkdown: temporaryMemo.contentMarkdown,
+            contentText: temporaryMemo.contentText,
+            updatedAt: temporaryMemo.updatedAt,
+          }
+        : null;
+    const remappedMemo: MemoDetail = contentSource
+      ? {
+          ...memo,
+          ...contentSource,
+          excerpt: createExcerpt(contentSource.contentText),
+        }
+      : memo;
+
+    await localDb.memos.put({ ...remappedMemo, scope });
     await localDb.memos.delete([scope, temporaryId]);
+    if (draft) {
+      await localDb.drafts.put({ ...draft, memoId: memo.id });
+    }
+    await localDb.drafts.delete(temporaryId);
     await localDb.idMappings.put({
       scope,
       temporaryId,
       remoteId: memo.id,
       createdAt: new Date().toISOString(),
     });
+    return remappedMemo;
   });
 };
 
@@ -573,18 +655,20 @@ export const applyLocalEmptyTrash = async (scope: string) => {
 export const mergeLocalMemos = async (scope: string, input: { memoIds: string[]; notebookId?: string; title?: string }) => {
   const sources = (await Promise.all(input.memoIds.map((memoId) => getLocalMemo(scope, memoId)))).filter((memo): memo is MemoDetail => Boolean(memo));
   if (sources.length < 2) return null;
-  const sourceMarkdown = sources.map((memo) => {
-    const markdown = resolveMemoContentMarkdown(memo.contentJson, memo.contentMarkdown);
-    if (!markdown.trim() && memo.contentText.trim()) {
+  const sourceDocs = sources.map((memo) => {
+    const doc = resolveMemoContentDoc(memo.contentJson, memo.contentMarkdown);
+    if (!docToText(doc).trim() && memo.contentText.trim()) {
       throw new Error("Source note content could not be recovered safely. Merge was cancelled.");
     }
-    return markdown;
+    return doc;
   });
-  const contentMarkdown = sourceMarkdown.join("\n\n---\n\n");
+  const contentJson = mergeMemoDocs(sourceDocs);
+  const contentMarkdown = docToMarkdown(contentJson);
   const memo = await createLocalMemo(scope, {
     notebookId: input.notebookId ?? sources[0]!.notebookId,
     title: resolveMergedMemoTitle(input.title, sources),
     contentMarkdown,
+    contentJson,
     tags: [...new Set(sources.flatMap((source) => source.tags))],
   });
   const merged = {

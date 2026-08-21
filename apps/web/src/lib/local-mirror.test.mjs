@@ -32,7 +32,11 @@ const {
   createLocalResource,
   listLocalResources,
   replaceLocalResources,
+  remapLocalDraftMemoId,
+  hasLocalSyncCursorRewound,
+  syncLocalMirror,
 } = await import("./local-mirror.ts");
+const { api } = await import("./api.ts");
 const { getCachedLocalResourceBytes } = await import("./local-resource-cache.ts");
 
 afterEach(async () => {
@@ -56,6 +60,70 @@ afterEach(async () => {
 });
 
 describe("local mirror", () => {
+  test("rebuilds the browser mirror when the server change cursor rewinds", () => {
+    expect(hasLocalSyncCursorRewound(42, 7)).toBe(true);
+    expect(hasLocalSyncCursorRewound(42, 42)).toBe(false);
+    expect(hasLocalSyncCursorRewound(42, 64)).toBe(false);
+    expect(hasLocalSyncCursorRewound(42)).toBe(false);
+  });
+
+  test("replaces stale IndexedDB data after the server change log is reset", async () => {
+    const scope = createLocalDataScope("https://demo.edgeever.org", "user-1");
+    await createLocalMemo(scope, { notebookId: "old-notebook", title: "Stale cached note" });
+    await localDb.syncMeta.bulkPut([
+      { scope, key: "cursor", value: "42", updatedAt: "2026-01-01T00:00:00.000Z" },
+      { scope, key: "identity", value: "same-workspace", updatedAt: "2026-01-01T00:00:00.000Z" },
+    ]);
+    const originalSyncChanges = api.syncChanges;
+    const originalSyncBootstrap = api.syncBootstrap;
+    api.syncChanges = async () => ({
+      changes: [],
+      cursor: 42,
+      hasMore: false,
+      serverCursor: 7,
+      syncIdentity: "same-workspace",
+    });
+    api.syncBootstrap = async () => ({
+      notebooks: [],
+      memos: [],
+      snapshotCursor: 7,
+      syncIdentity: "same-workspace",
+      totalCount: 0,
+      nextAfterId: null,
+    });
+
+    try {
+      expect(await syncLocalMirror(scope)).toEqual({ bootstrapped: true, changed: 0 });
+      expect((await listLocalMemos(scope, {})).totalCount).toBe(0);
+      expect((await localDb.syncMeta.get([scope, "cursor"]))?.value).toBe("7");
+    } finally {
+      api.syncChanges = originalSyncChanges;
+      api.syncBootstrap = originalSyncBootstrap;
+    }
+  });
+
+  test("keeps the newest draft when memo ids are remapped more than once", async () => {
+    await localDb.drafts.put({
+      memoId: "local-memo",
+      title: "Older draft",
+      tagsText: "",
+      contentJson: { type: "doc", content: [] },
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+    await localDb.drafts.put({
+      memoId: "remote-memo",
+      title: "Newer draft",
+      tagsText: "",
+      contentJson: { type: "doc", content: [] },
+      updatedAt: "2026-01-02T00:00:00.000Z",
+    });
+
+    await remapLocalDraftMemoId("local-memo", "remote-memo");
+
+    expect(await localDb.drafts.get("local-memo")).toBeUndefined();
+    expect(await localDb.drafts.get("remote-memo")).toMatchObject({ title: "Newer draft" });
+  });
+
   test("creates and lists a memo without a network request", async () => {
     const scope = createLocalDataScope("https://demo.edgeever.org", "user-1");
     const memo = await createLocalMemo(scope, {
@@ -69,6 +137,18 @@ describe("local mirror", () => {
     expect(result.totalCount).toBe(1);
     expect(result.memos[0]?.id).toBe(memo.id);
     expect(result.memos[0]?.excerpt).toContain("Hello local first");
+  });
+
+  test("filters local memos by an exact tag across notebooks", async () => {
+    const scope = createLocalDataScope("https://demo.edgeever.org", "user-1");
+    const expected = await createLocalMemo(scope, { notebookId: "nb-a", tags: ["Demo"] });
+    await createLocalMemo(scope, { notebookId: "nb-b", tags: ["demo-extra"] });
+    await createLocalMemo(scope, { notebookId: "nb-b", title: "Demo without tag" });
+
+    const result = await listLocalMemos(scope, { tag: "demo" });
+
+    expect(result.totalCount).toBe(1);
+    expect(result.memos.map((memo) => memo.id)).toEqual([expected.id]);
   });
 
   test("updates local content and preserves the memo identity", async () => {
@@ -157,7 +237,10 @@ describe("local mirror", () => {
     const second = await createLocalMemo(scope, { notebookId: "inbox", title: "Second", contentMarkdown: "two", tags: ["b"] });
     const merged = await mergeLocalMemos(scope, { memoIds: [first.id, second.id], title: "Merged" });
     expect(merged?.title).toBe("Merged");
-    expect(merged?.contentMarkdown).toContain("one\n\n---\n\ntwo");
+    expect(merged?.contentMarkdown).toContain("one");
+    expect(merged?.contentMarkdown).toContain("two");
+    expect(merged?.contentMarkdown).toContain("edgeever:merge-divider");
+    expect(merged?.contentJson?.content?.some((node) => node.type === "edgeeverMergeDivider")).toBe(true);
     expect(merged?.sourceMemoIds).toEqual([first.id, second.id]);
     expect((await getLocalMemo(scope, first.id))?.isDeleted).toBe(true);
     expect((await getLocalMemo(scope, second.id))?.mergedIntoMemoId).toBe(merged?.id);
