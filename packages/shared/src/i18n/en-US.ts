@@ -244,9 +244,6 @@ export const enUS = {
     linkOpenModifierTitle: "Open web links with Ctrl/⌘ + click while editing",
     linkOpenModifierDescription: "On by default: hold Ctrl/⌘ and click to open web links, preventing accidental opens while editing. Note references always open with one click. Desktop only.",
     linkOpenModifierAria: "Require Ctrl or ⌘ click to open web links while editing",
-    syncIntervalTitle: "Automatic sync interval",
-    syncIntervalDescription: "Sync edits to the server automatically while keeping local drafts available immediately.",
-    syncIntervals: { "30s": "Every 30 seconds", "5m": "Every 5 minutes", "15m": "Every 15 minutes", "30m": "Every 30 minutes", "1h": "Every hour", "2h": "Every 2 hours" },
     mermaidThemeTitle: "Diagram theme",
     mermaidThemeDescription: "Follow the app appearance or choose a fixed visual theme for diagrams.",
     markdownThemeTitle: "Markdown source theme",
@@ -1088,6 +1085,8 @@ export const enUS = {
       conflict: "Conflict",
       error: "Save failed",
       unsaved: "Unsaved",
+      storageUnavailable: "Browser local storage stopped responding. Keep this page open, close other EdgeEver tabs, then retry. Copy the local draft before clearing any browser data.",
+      storageRetry: "Retry save",
       conflictReason: {
         revisionWithVersions: "The cloud note was updated (local base revision {{expected}}, cloud is {{current}}). Common causes: another browser tab, another device, or a cloud change while you were offline. Copy your local draft, then use the cloud version before editing again.",
         revision: "The cloud note was updated elsewhere. Common causes: another browser tab, another device, or a cloud change while you were offline. Copy your local draft, then use the cloud version before editing again.",

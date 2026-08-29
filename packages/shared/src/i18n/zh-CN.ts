@@ -244,9 +244,6 @@ export const zhCN = {
     linkOpenModifierTitle: "编辑时用 Ctrl/⌘ + 点击打开网页链接",
     linkOpenModifierDescription: "默认开启：网页链接需按住 Ctrl/⌘ 再点击，避免编辑时误触；笔记引用始终单击打开（仅桌面）。",
     linkOpenModifierAria: "编辑时是否需要 Ctrl 或 ⌘ 再点击才能打开网页链接",
-    syncIntervalTitle: "自动同步间隔",
-    syncIntervalDescription: "定期将编辑内容同步到服务器，本地草稿仍会即时保留。",
-    syncIntervals: { "30s": "每 30 秒", "5m": "每 5 分钟", "15m": "每 15 分钟", "30m": "每 30 分钟", "1h": "每 1 小时", "2h": "每 2 小时" },
     mermaidThemeTitle: "图表主题",
     mermaidThemeDescription: "跟随应用外观，或为笔记图表选择固定主题。",
     markdownThemeTitle: "Markdown 源码主题",
@@ -1088,6 +1085,8 @@ export const zhCN = {
       conflict: "有冲突",
       error: "保存失败",
       unsaved: "未保存",
+      storageUnavailable: "浏览器本地存储无响应。请保持当前页面打开，关闭其他 EdgeEver 标签页后重试。清除浏览器数据前请先复制本地草稿。",
+      storageRetry: "重试保存",
       conflictReason: {
         revisionWithVersions: "云端笔记已更新（本地基于版本 {{expected}}，云端已是 {{current}}）。常见原因：其他标签页、其他设备，或离线期间云端被改过。可先复制本地草稿，再采用云端版本后继续编辑。",
         revision: "云端笔记已在其他位置被更新。常见原因：其他标签页、其他设备，或离线期间云端被改过。可先复制本地草稿，再采用云端版本后继续编辑。",
