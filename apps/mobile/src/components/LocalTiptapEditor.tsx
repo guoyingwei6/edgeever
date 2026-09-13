@@ -16,10 +16,15 @@ import {
   AI_TARGET_LANGUAGES,
   AI_TONES,
   AI_WHOLE_NOTE_ACTIONS,
+  buildAiAssistantLastActionPreference,
   canReplaceAiSource,
   createNativeUnsupportedContentExtensions,
   docToMarkdown,
+  getDefaultAiAction,
   getDefaultAiTargetLanguage,
+  readStoredAiAssistantLastActionPreference,
+  resolveAiAssistantLastAction,
+  writeStoredAiAssistantLastActionPreference,
   getAiDocumentFingerprint,
   getRichTextAiSelectionContext,
   getRichTextAiSelectionReplacement,
@@ -36,6 +41,8 @@ import {
   getResourceIdFromUrl,
   diagramDocumentToX6Cells,
   attachDiagramReader,
+  MIND_MAP_CONNECTOR_NAME,
+  mindMapConnector,
   type AiAction,
   type AiPromptParameterKind,
   type AiPromptResultMode,
@@ -135,37 +142,21 @@ type LocalTiptapEditorSharedProps = {
   ref: Ref<LocalTiptapEditorRef>;
   locale: "zh-CN" | "en-US";
   theme: "light" | "dark";
-};
-
-/** Editable note body with toolbar (create / rich edit). */
-type LocalTiptapEditorModeProps = LocalTiptapEditorSharedProps & {
-  mode?: "editor";
+  /** Live-switchable. The same DomWebView stays mounted across viewer → editor. */
+  mode?: "editor" | "viewer";
   aiPromptsJson?: string;
   autoFocus?: boolean;
-  onChange: (content: EditorDoc) => Promise<void>;
-  onPickImage: () => Promise<void>;
+  onChange?: (content: EditorDoc) => Promise<void>;
+  onPickImage?: () => Promise<void>;
   onAiRequest?: (requestJson: string) => Promise<void>;
   onAiCancel?: (requestId: string) => Promise<void>;
-  onReady: (startupMs: number) => Promise<void>;
-};
-
-/**
- * Read-only note body that reuses the same TipTap schema / image loading as the
- * editor. Used by the native memo detail chrome (scheme C).
- */
-type LocalTiptapViewerModeProps = LocalTiptapEditorSharedProps & {
-  mode: "viewer";
-  /** Parsed visual diagram IR for the native X6 read-only viewer. */
   visualDiagramJson?: string;
-  /** Hides code affordances when a damaged diagram falls back to Mermaid. */
   visualDiagramNote?: boolean;
-  /** JSON: `{ alt: string; source: string }` for fullscreen image preview. */
   onImagePreview?: (payloadJson: string) => Promise<void>;
-  /** Enter note editing after a deliberate double tap on ordinary body content. */
   onDoublePress?: () => Promise<void>;
 };
 
-type LocalTiptapEditorProps = LocalTiptapEditorModeProps | LocalTiptapViewerModeProps;
+type LocalTiptapEditorProps = LocalTiptapEditorSharedProps;
 
 type MermaidRendererProps = {
   diagramsJson: string;
@@ -452,6 +443,8 @@ const MermaidRenderRuntime = (props: MermaidRendererProps) => {
   return null;
 };
 
+Graph.registerConnector(MIND_MAP_CONNECTOR_NAME, mindMapConnector, true);
+
 const ReadOnlyX6Diagram = ({
   diagram,
   locale,
@@ -640,6 +633,8 @@ const scrollEditorPositionIntoView = (
 
 function LocalTiptapEditorImpl(props: LocalTiptapEditorProps) {
   const isViewer = props.mode === "viewer";
+  const isViewerRef = useRef(isViewer);
+  isViewerRef.current = isViewer;
   const visualDiagram = useMemo(() => {
     if (props.mode !== "viewer" || !props.visualDiagramJson) return null;
     try {
@@ -742,22 +737,19 @@ function LocalTiptapEditorImpl(props: LocalTiptapEditorProps) {
       props.locale,
       (source) => onLoadResourceRef.current(source),
       {
-        readOnly: isViewer,
+        readOnly: () => isViewerRef.current,
         // NodeView binds ⋯ / image taps directly — Android WebView often drops
         // click after pointerdown preventDefault, so PM handleClick is not enough.
         onResourcePress: (targetJson) => onResourcePressRef.current?.(targetJson),
         onImagePreview: (payloadJson) => onImagePreviewRef.current?.(payloadJson),
       }
     ),
-    [isViewer, props.baseUrl, props.locale]
+    [props.baseUrl, props.locale]
   );
+  const diagramViewer = isViewer && Boolean(props.mode === "viewer" && props.visualDiagramNote);
   const mermaidCodeBlockExtension = useMemo(
-    () => createMobileCodeBlockExtension(
-      props.locale,
-      props.theme,
-      props.mode === "viewer" && Boolean(props.visualDiagramNote),
-    ),
-    [props.locale, props.mode, props.theme, props.mode === "viewer" ? props.visualDiagramNote : undefined]
+    () => createMobileCodeBlockExtension(props.locale, props.theme, diagramViewer),
+    [diagramViewer, props.locale, props.theme]
   );
   const searchHighlightExtension = useMemo(
     () => Extension.create({
@@ -795,11 +787,9 @@ function LocalTiptapEditorImpl(props: LocalTiptapEditorProps) {
         table: { renderWrapper: true },
       }),
       ...createNativeUnsupportedContentExtensions(),
-      ...(isViewer
-        ? []
-        : [Placeholder.configure({
-            placeholder: getMobileEditorPlaceholder(props.locale),
-          })]),
+      Placeholder.configure({
+        placeholder: () => isViewerRef.current ? "" : getMobileEditorPlaceholder(props.locale),
+      }),
     ],
     content: prepareNativeEditorContent(
       resolveImageSources(resolveMobileAttachmentContent(props.content), props.baseUrl),
@@ -813,7 +803,7 @@ function LocalTiptapEditorImpl(props: LocalTiptapEditorProps) {
         // Intercept attachment anchors before ProseMirror's later click phase so
         // the embedded file:// WebView never follows relative resource URLs.
         click: (_view, event) => handleMobileResourceEvent(event, onResourcePressRef.current, {
-          allowImagePreview: isViewer,
+          allowImagePreview: isViewerRef.current,
           onImagePreview: onImagePreviewRef.current,
         }),
         contextmenu: (_view, event) => handleMobileResourceEvent(event, onResourcePressRef.current, {
@@ -821,7 +811,7 @@ function LocalTiptapEditorImpl(props: LocalTiptapEditorProps) {
           onImagePreview: onImagePreviewRef.current,
         }),
         dblclick: (_view, event) => {
-          if (!isViewer || !onDoublePressRef.current) return false;
+          if (!isViewerRef.current || !onDoublePressRef.current) return false;
           const target = event.target as HTMLElement | null;
           if (!target || target.closest("a, button, img, input, textarea, select, .edgeever-image-node")) {
             return false;
@@ -834,7 +824,7 @@ function LocalTiptapEditorImpl(props: LocalTiptapEditorProps) {
       },
     },
     onUpdate: ({ editor: activeEditor, transaction }) => {
-      if (isViewer || !onChangeRef.current) {
+      if (isViewerRef.current || !onChangeRef.current) {
         return;
       }
       if (transaction.getMeta(TRANSIENT_IMAGE_UPLOAD_META)) {
@@ -851,7 +841,7 @@ function LocalTiptapEditorImpl(props: LocalTiptapEditorProps) {
   });
 
   const flush = useCallback(() => {
-    if (isViewer || !editor || editor.isDestroyed || !onChangeRef.current) {
+    if (isViewerRef.current || !editor || editor.isDestroyed || !onChangeRef.current) {
       return;
     }
     if (changeTimerRef.current !== null) {
@@ -859,7 +849,7 @@ function LocalTiptapEditorImpl(props: LocalTiptapEditorProps) {
       changeTimerRef.current = null;
     }
     void onChangeRef.current(getPersistableEditorDoc(editor.getJSON() as EditorDoc, props.baseUrl));
-  }, [editor, isViewer, props.baseUrl]);
+  }, [editor, props.baseUrl]);
 
   const setContent = useCallback((contentJsonSerialized: DOMValue) => {
     if (!editor || editor.isDestroyed || typeof contentJsonSerialized !== "string") {
@@ -1081,11 +1071,15 @@ function LocalTiptapEditorImpl(props: LocalTiptapEditorProps) {
       content: editor.state.doc.slice(from, to).content.toJSON(),
     } as EditorDoc, props.baseUrl)).trim();
     if (!markdown) return false;
-    const preferredAction = wholeNote ? "summarize" : "improve-writing";
-    const preferredPrompt = aiPrompts.find((prompt) => prompt.seedKey === preferredAction)
-      ?? aiPrompts[0]
-      ?? null;
-    const initialAction = preferredPrompt?.action ?? preferredAction;
+    const resolved = resolveAiAssistantLastAction({
+      fallbackAction: getDefaultAiAction(!wholeNote),
+      preference: readStoredAiAssistantLastActionPreference(wholeNote ? "wholeNote" : "selected"),
+      prompts: aiPrompts,
+    });
+    const preferredPrompt = resolved.selectedPromptId
+      ? aiPrompts.find((prompt) => prompt.id === resolved.selectedPromptId) ?? null
+      : null;
+    const initialAction = preferredPrompt?.action ?? resolved.action;
     setAiPanel({
       selection: {
         from,
@@ -1099,8 +1093,8 @@ function LocalTiptapEditorImpl(props: LocalTiptapEditorProps) {
       promptId: preferredPrompt?.id ?? null,
       parameterKind: preferredPrompt?.parameterKind ?? fallbackPromptParameterKind(initialAction),
       resultMode: preferredPrompt?.resultMode ?? fallbackPromptResultMode(initialAction),
-      targetLanguage: getDefaultAiTargetLanguage(props.locale),
-      tone: "professional",
+      targetLanguage: resolved.targetLanguage ?? getDefaultAiTargetLanguage(props.locale),
+      tone: resolved.tone ?? "professional",
       customInstruction: "",
       refineInstruction: "",
       output: "",
@@ -1383,45 +1377,31 @@ function LocalTiptapEditorImpl(props: LocalTiptapEditorProps) {
   );
 
   useEffect(() => {
+    if (!editor || editor.isDestroyed) {
+      return;
+    }
+    editor.setEditable(!isViewer);
+    editor.view.dom.classList.toggle("edgeever-viewer-content", isViewer);
+  }, [editor, isViewer]);
+
+  useEffect(() => {
     if (!editor) {
       return;
     }
 
     void onReadyRef.current(Math.round(performance.now() - startedAtRef.current));
-    let focusFrame = 0;
-    let focusRetry: number | null = null;
-    if (autoFocus) {
-      const focusAtEnd = () => {
-        if (!editor.isDestroyed) {
-          editor.commands.focus("end");
-        }
-      };
-      focusFrame = window.requestAnimationFrame(focusAtEnd);
-      // The DOM view can report ready one bridge turn before Android attaches
-      // its input connection. Keep the HTML selection ready for the native IME
-      // handoff without delaying the editor's first visible frame.
-      focusRetry = window.setTimeout(focusAtEnd, 120);
-    }
     const handlePageHide = () => flush();
     const handleVisibilityChange = () => {
       if (document.visibilityState === "hidden") {
         flush();
       }
     };
-    if (!isViewer) {
-      window.addEventListener("pagehide", handlePageHide);
-      document.addEventListener("visibilitychange", handleVisibilityChange);
-    }
+    window.addEventListener("pagehide", handlePageHide);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
 
     return () => {
-      window.cancelAnimationFrame(focusFrame);
-      if (focusRetry !== null) {
-        window.clearTimeout(focusRetry);
-      }
-      if (!isViewer) {
-        window.removeEventListener("pagehide", handlePageHide);
-        document.removeEventListener("visibilitychange", handleVisibilityChange);
-      }
+      window.removeEventListener("pagehide", handlePageHide);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
       if (changeTimerRef.current !== null) {
         window.clearTimeout(changeTimerRef.current);
       }
@@ -1432,7 +1412,27 @@ function LocalTiptapEditorImpl(props: LocalTiptapEditorProps) {
         window.clearTimeout(aiUndoTimerRef.current);
       }
     };
-  }, [autoFocus, editor, flush, isViewer]);
+  }, [editor, flush]);
+
+  useEffect(() => {
+    if (!editor || editor.isDestroyed || isViewer || !autoFocus) {
+      return;
+    }
+    const focusAtEnd = () => {
+      if (!editor.isDestroyed) {
+        editor.commands.focus("end");
+      }
+    };
+    const focusFrame = window.requestAnimationFrame(focusAtEnd);
+    // The DOM view can report ready one bridge turn before Android attaches
+    // its input connection. Keep the HTML selection ready for the native IME
+    // handoff without delaying the editor's first visible frame.
+    const focusRetry = window.setTimeout(focusAtEnd, 120);
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      window.clearTimeout(focusRetry);
+    };
+  }, [autoFocus, editor, isViewer]);
 
   // Keep the viewer in sync when the parent swaps memo content.
   useEffect(() => {
@@ -1777,11 +1777,31 @@ const MobileSelectionAiPanel = ({
   const replaceDisabled = panel.generating || !panel.output || panel.resultMode === "append";
   const selectedPrompt = panel.promptId ? prompts.find((prompt) => prompt.id === panel.promptId) ?? null : null;
 
+  const persistLastAction = (
+    nextAction: AiAction,
+    nextPromptId: string | null,
+    nextTargetLanguage = panel.targetLanguage,
+    nextTone = panel.tone,
+  ) => {
+    const prompt = nextPromptId ? prompts.find((item) => item.id === nextPromptId) : null;
+    writeStoredAiAssistantLastActionPreference(
+      panel.selection.wholeNote ? "wholeNote" : "selected",
+      buildAiAssistantLastActionPreference({
+        action: nextAction,
+        promptId: nextPromptId,
+        seedKey: prompt?.seedKey ?? null,
+        targetLanguage: nextTargetLanguage,
+        tone: nextTone,
+      }),
+    );
+  };
+
   const selectPromptOrAction = (value: string) => {
     if (value.startsWith(AI_PROMPT_OPTION_PREFIX)) {
       const promptId = value.slice(AI_PROMPT_OPTION_PREFIX.length);
       const prompt = prompts.find((item) => item.id === promptId);
       if (!prompt) return;
+      persistLastAction(prompt.action, prompt.id);
       update({
         action: prompt.action,
         promptId: prompt.id,
@@ -1793,6 +1813,7 @@ const MobileSelectionAiPanel = ({
       return;
     }
     const action = value as AiAction;
+    persistLastAction(action, null);
     update({
       action,
       promptId: null,
@@ -1840,8 +1861,16 @@ const MobileSelectionAiPanel = ({
 
   const choosePickerOption = (value: string) => {
     if (picker === "action") selectPromptOrAction(value);
-    if (picker === "language") update({ targetLanguage: value as AiTargetLanguage, output: "", error: null });
-    if (picker === "tone") update({ tone: value as AiTone, output: "", error: null });
+    if (picker === "language") {
+      const targetLanguage = value as AiTargetLanguage;
+      persistLastAction(panel.action, panel.promptId, targetLanguage);
+      update({ targetLanguage, output: "", error: null });
+    }
+    if (picker === "tone") {
+      const tone = value as AiTone;
+      persistLastAction(panel.action, panel.promptId, panel.targetLanguage, tone);
+      update({ tone, output: "", error: null });
+    }
     setPicker(null);
   };
 
@@ -2418,7 +2447,7 @@ const createProtectedImageExtension = (
   locale: "zh-CN" | "en-US",
   loadResource: (source: string) => Promise<string | null>,
   options?: {
-    readOnly?: boolean;
+    readOnly?: boolean | (() => boolean);
     onResourcePress?: (targetJson: string) => void | Promise<void>;
     onImagePreview?: (payloadJson: string) => void | Promise<void>;
   }
@@ -2439,9 +2468,14 @@ const createProtectedImageExtension = (
   },
   addNodeView() {
     return ({ editor, getPos, node }) => {
-      const readOnly = Boolean(options?.readOnly) || !editor.isEditable;
+      const isReadOnly = () => {
+        const option = options?.readOnly;
+        const fromOption = typeof option === "function" ? option() : Boolean(option);
+        return fromOption || !editor.isEditable;
+      };
+      const readOnly = isReadOnly();
       const updateWidth = (width: number) => {
-        if (readOnly) {
+        if (isReadOnly()) {
           return;
         }
         const position = getPos();
@@ -2666,18 +2700,18 @@ const createProtectedImageExtension = (
       actionButton.setAttribute("aria-label", locale === "en-US" ? "Image actions" : "图片操作");
       actionButton.textContent = "⋯";
       bindImageActionButton(wrapper, actionButton);
-      if (readOnly) {
-        image.style.cursor = "zoom-in";
-        image.addEventListener("click", (event) => {
-          // Ignore taps that originated on the ⋯ control (event target would be button).
-          if (event.target instanceof Element && event.target.closest(".edgeever-image-actions")) {
-            return;
-          }
-          event.preventDefault();
-          event.stopPropagation();
-          emitImagePreview(wrapper);
-        });
-      }
+      image.addEventListener("click", (event) => {
+        if (!isReadOnly()) {
+          return;
+        }
+        // Ignore taps that originated on the ⋯ control (event target would be button).
+        if (event.target instanceof Element && event.target.closest(".edgeever-image-actions")) {
+          return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        emitImagePreview(wrapper);
+      });
       wrapper.append(loading, image, actionButton, sizeControls.dom);
       const imageType = node.type;
       let requestId = 0;
@@ -2814,7 +2848,7 @@ const createProtectedImageExtension = (
         },
         selectNode: () => {
           wrapper.classList.add("is-selected");
-          sizeControls.setVisible(!readOnly && displayReady);
+          sizeControls.setVisible(!isReadOnly() && displayReady);
         },
         deselectNode: () => {
           wrapper.classList.remove("is-selected");
@@ -3178,9 +3212,12 @@ const getEditorStyles = (theme: "light" | "dark", options?: { viewer?: boolean }
   .edgeever-code-block, .edgeever-mermaid-code-block { position: relative; margin: 18px 0; overflow: visible; background: transparent; }
   .edgeever-code-copy-button { position: absolute; top: 8px; right: 8px; z-index: 1; border: 1px solid ${theme === "dark" ? "#475569" : "#cbded1"}; border-radius: 6px; padding: 5px 8px; background: ${theme === "dark" ? "rgba(30, 41, 59, 0.94)" : "rgba(247, 251, 248, 0.94)"}; color: ${theme === "dark" ? "#cbd5e1" : "#475569"}; font: inherit; font-size: 12px; line-height: 1.35; }
   .edgeever-code-copy-button:active { border-color: #0f766e; color: ${theme === "dark" ? "#86efac" : "#0f766e"}; }
-  .edgeever-x6-document { min-height: 100%; padding: 18px 12px 32px; background: ${theme === "dark" ? "#0f172a" : "#fff"}; }
-  .edgeever-x6-diagram { width: 100%; height: min(56vh, 520px); min-height: 360px; overflow: hidden; border: 1px solid ${theme === "dark" ? "#26382f" : "#e3ece7"}; border-radius: 14px; background: ${theme === "dark" ? "#101311" : "#f8faf9"}; touch-action: none; }
+  .edgeever-editor-scroll:has(.edgeever-x6-document) { display: flex; flex-direction: column; overflow: hidden; }
+  .edgeever-x6-document, .edgeever-diagram-reader-host { display: flex; flex-direction: column; height: 100%; min-height: 100%; padding: 8px 12px 12px; background: ${theme === "dark" ? "#0f172a" : "#fff"}; }
+  .edgeever-diagram-reader-controls { flex: 0 0 auto; }
+  .edgeever-x6-diagram { flex: 1 1 auto; width: 100%; height: auto; min-height: 240px; overflow: hidden; border: 1px solid ${theme === "dark" ? "#26382f" : "#e3ece7"}; border-radius: 14px; background: ${theme === "dark" ? "#101311" : "#f8faf9"}; touch-action: none; }
   .edgeever-x6-diagram .x6-graph-svg { overflow: hidden; }
+  .edgeever-x6-diagram .x6-node { cursor: pointer; }
   .edgeever-mermaid-code-block > pre { display: none; margin: 8px 0 0; }
   .edgeever-mermaid-code-block.is-source-visible > pre { display: block; }
   .edgeever-mermaid-preview { display: flex; min-height: 104px; align-items: center; justify-content: center; overflow-x: auto; padding: 16px 4px; background: transparent; }

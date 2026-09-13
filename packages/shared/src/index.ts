@@ -2,6 +2,7 @@ export * from "./content";
 export * from "./companion";
 export * from "./public-demo";
 export * from "./ai-assistant";
+export * from "./ai-generation";
 export * from "./ai-prompt-seeds";
 export * from "./ai-tag-suggestions";
 export * from "./ai-selection";
@@ -30,13 +31,23 @@ export * from "./sync";
 export * from "./desktop-rpc";
 export * from "./deployment-metadata";
 export * from "./diagram";
+export * from "./diagram-palette";
+export * from "./diagram-flowchart-style";
+export * from "./diagram-architecture-style";
+export * from "./diagram-mindmap-style";
 export * from "./diagram-view";
 export * from "./file-attachment";
 export * from "./note-image-card";
 export * from "./pdf-attachment";
 export * from "./types";
+export * from "./version";
 export * from './plugin-capabilities';
 
-export { attachDiagramReader } from "./diagram-reader";
+export {
+  attachDiagramReader,
+  DIAGRAM_READER_MIN_SCALE,
+  diagramReaderFocusNode,
+  diagramReaderOpeningMode,
+} from "./diagram-reader";
 
 export { attachDiagramScroll } from "./diagram-scroll";

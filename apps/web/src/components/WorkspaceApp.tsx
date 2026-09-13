@@ -32,6 +32,8 @@ import { QuickMemoSwitcher } from "./QuickMemoSwitcher";
 import { AppConfirmDialog, MemoDeleteConfirmDialog, NotebookNameDialog } from "./dialogs/ConfirmDialogs";
 import { PluginPanelDialog } from "./plugins/PluginPanelDialog";
 import { api, getOrCreateClientDeviceId } from "@/lib/api";
+import { MarkdownExportMemoryLimitError, type MarkdownExportProgress } from "@/lib/markdown-export";
+import { exportSelectedMemosAsMarkdownZip } from "@/lib/selected-markdown-export";
 import { createPluginScheduleAdapter } from "@/lib/plugins/plugin-schedule-adapter";
 import {
   clearMobileEditorReturnPreview,
@@ -75,6 +77,8 @@ import {
   getExpandableNotebookIds,
   filterNotebookTree,
   getNotebookMoveOptions,
+  getMemoIdsNeedingMove,
+  resolveSelectionMoveTargetNotebookId,
 } from "@/lib/app-helpers";
 import { useBrowserBackLayer } from "@/lib/app-hooks";
 import { updateMemoSummaryInLists, type MemoListQueryData } from "@/lib/memo-list-cache";
@@ -85,6 +89,7 @@ import {
   putLocalMemo,
   putLocalNotebook,
 } from "@/lib/local-mirror";
+import { getPersistentDataScopeOrigin } from "@/lib/app-page-path";
 import { createRepository } from "@/lib/repository";
 import { notifyRepositoryMutation } from "@/lib/repository-events";
 import {
@@ -100,9 +105,12 @@ import { useWorkspacePreferences } from "@/hooks/useWorkspacePreferences";
 import { useWorkspaceSelection } from "@/hooks/useWorkspaceSelection";
 import { useWorkspaceQueuedSync } from "@/hooks/useWorkspaceQueuedSync";
 import { EdgeEverPluginHost, type RegisteredPluginPanel } from "@/lib/plugins/plugin-host";
+import { loadResolvedPluginMarketplace } from "@/lib/plugins/plugin-marketplace";
+import { updateOfficialMarketplacePlugins } from "@/lib/plugins/plugin-updates";
 import { createPublicNetworkAdapter } from "@/lib/plugins/public-network-adapter";
 import { clearRendererRecoveryRequired, isRendererRecoveryRequired } from "@/lib/renderer-recovery";
 import { EditorPaneErrorBoundary, EditorRecoveryPane } from "./EditorPaneErrorBoundary";
+import { isMarkdownFile, readMarkdownFile } from "@/lib/markdown-file-import";
 
 const isDesktopViewport = () => window.matchMedia("(min-width: 1024px)").matches;
 const PULL_TO_REFRESH_TRIGGER_PX = 72;
@@ -167,7 +175,7 @@ const ExecutionCenterPane = lazy(() =>
 );
 
 const PaneLoadingFallback = ({ label = "Loading" }: { label?: string }) => (
-  <div className="flex h-full min-h-0 items-center justify-center bg-white text-sm font-medium text-slate-400" role="status">
+  <div className="flex h-full min-h-0 items-center justify-center bg-card text-sm font-medium text-slate-400" role="status">
     {label}
   </div>
 );
@@ -375,7 +383,7 @@ const MobileBottomNav = ({
 
   return (
     <nav
-      className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/95 px-5 pb-[max(0.125rem,env(safe-area-inset-bottom))] pt-0 shadow-[0_-10px_30px_rgba(15,23,42,0.08)] backdrop-blur lg:hidden"
+      className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-card/95 px-5 pb-[max(0.125rem,env(safe-area-inset-bottom))] pt-0 shadow-[0_-10px_30px_rgba(15,23,42,0.08)] backdrop-blur lg:hidden"
       aria-label={t("nav.mobileMain")}
     >
       <div className="relative grid h-mobile-bottom-nav grid-cols-3 items-center">
@@ -510,7 +518,7 @@ const MobileNotebookPicker = ({
             />
             {notebookSearch && (
               <button
-                className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-slate-400 transition hover:bg-white hover:text-slate-700"
+                className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-slate-400 transition hover:bg-card hover:text-slate-700"
                 type="button"
                 title={t("mobileNotebookPicker.clearSearch")}
                 aria-label={t("mobileNotebookPicker.clearSearch")}
@@ -701,7 +709,7 @@ export const WorkspaceApp = ({
     navigateExecutionCenter: navigateWorkspaceExecutionCenter,
   } = useWorkspaceRoute();
   const localDataScope = useMemo(
-    () => createLocalDataScope(window.location.origin, user?.id),
+    () => createLocalDataScope(getPersistentDataScopeOrigin(window.location.origin), user?.id),
     [user?.id]
   );
   const repository = useMemo(() => createRepository(localDataScope), [localDataScope]);
@@ -748,6 +756,11 @@ export const WorkspaceApp = ({
   const [notebookNameDialog, setNotebookNameDialog] = useState<NotebookNameDialogState | null>(null);
   const [notebookDeleteConfirmation, setNotebookDeleteConfirmation] = useState<Notebook | null>(null);
   const [appNoticeDialog, setAppNoticeDialog] = useState<AppNoticeDialogState | null>(null);
+  const [isExportingSelectedMemos, setIsExportingSelectedMemos] = useState(false);
+  const [selectedMarkdownExportProgress, setSelectedMarkdownExportProgress] = useState<MarkdownExportProgress>({
+    completed: 0,
+    total: 0,
+  });
   const [demoResetConfirmationOpen, setDemoResetConfirmationOpen] = useState(false);
   const scheduledTaskDeviceId = useMemo(
     () => window.edgeeverDesktop?.isAvailable ? getOrCreateClientDeviceId() : null,
@@ -793,6 +806,36 @@ export const WorkspaceApp = ({
       void pluginHost.dispose();
     };
   }, [pluginHost]);
+  useEffect(() => {
+    if (!pluginHostReady) return;
+    let active = true;
+    let running = false;
+    const updateOfficialPlugins = async () => {
+      if (!active || running) return;
+      running = true;
+      try {
+        const marketplace = await loadResolvedPluginMarketplace();
+        await updateOfficialMarketplacePlugins(pluginHost, marketplace.entries);
+        const firstResolutionError = Object.entries(marketplace.resolutionErrors)[0];
+        if (firstResolutionError) {
+          console.error(`Official plugin ${firstResolutionError[0]} update resolution failed.`, firstResolutionError[1]);
+        }
+      } catch (error) {
+        console.error("Official plugin update check failed.", error);
+      } finally {
+        running = false;
+      }
+    };
+    const handleFocus = () => { void updateOfficialPlugins(); };
+    const intervalId = window.setInterval(() => void updateOfficialPlugins(), 30 * 60_000);
+    window.addEventListener("focus", handleFocus);
+    void updateOfficialPlugins();
+    return () => {
+      active = false;
+      window.clearInterval(intervalId);
+      window.removeEventListener("focus", handleFocus);
+    };
+  }, [pluginHost, pluginHostReady]);
   const scheduledTasksQuery = useQuery({
     queryKey: ["scheduled-tasks", scheduledTaskDeviceId],
     queryFn: () => api.listScheduledTasks(scheduledTaskDeviceId ?? undefined),
@@ -942,11 +985,13 @@ export const WorkspaceApp = ({
     editorContentAlignment,
     imageCompressionEnabled,
     memoListWidth,
+    notebookSidebarCollapsed,
     resetMemoListWidth,
     setDesktopFocusMode,
     setEditorContentAlignment,
     setImageCompressionEnabled,
     setMemoListWidth,
+    setNotebookSidebarCollapsed,
     setShortcutSettings,
     shortcutSettings,
   } = useWorkspacePreferences();
@@ -2049,6 +2094,7 @@ export const WorkspaceApp = ({
     : null;
   const selectedMemo = memoQuery.data?.memo ?? cachedSelectedMemo;
   const selectedDiagram = parseDiagramDocument(selectedMemo?.contentMarkdown);
+  const desktopNotebookSidebarCollapsed = Boolean(isDesktop && notebookSidebarCollapsed);
   const desktopFocusModeActive = Boolean(
     isDesktop && desktopFocusMode && rightView === "editor" && selectedMemo && !memoSelectionModeActive
   );
@@ -2059,13 +2105,14 @@ export const WorkspaceApp = ({
   );
 
   useEffect(() => {
-    if (selectedNotebook?.id) {
-      setSelectionMoveTargetNotebookId(selectedNotebook.id);
-      return;
-    }
+    const nextTargetId = resolveSelectionMoveTargetNotebookId(
+      selectionMoveTargetNotebookId,
+      selectionMoveNotebookOptions.map((option) => option.id),
+      selectedNotebook?.id
+    );
 
-    if (!selectionMoveTargetNotebookId && selectionMoveNotebookOptions[0]?.id) {
-      setSelectionMoveTargetNotebookId(selectionMoveNotebookOptions[0].id);
+    if (nextTargetId !== selectionMoveTargetNotebookId) {
+      setSelectionMoveTargetNotebookId(nextTargetId);
     }
   }, [selectedNotebook?.id, selectionMoveNotebookOptions, selectionMoveTargetNotebookId]);
 
@@ -2137,6 +2184,46 @@ export const WorkspaceApp = ({
     });
   };
 
+  const handleImportMarkdownFiles = async (files: File[]) => {
+    const targetNotebookId = createMemoNotebookId;
+
+    if (!targetNotebookId || memoView === "trash") return;
+    if (files.length !== 1) {
+      setAppNoticeDialog({
+        title: t("memoList.importMarkdownFailedTitle"),
+        description: t("memoList.importMarkdownSingleFile"),
+      });
+      return;
+    }
+
+    const [file] = files;
+    if (!isMarkdownFile(file)) {
+      setAppNoticeDialog({
+        title: t("memoList.importMarkdownFailedTitle"),
+        description: t("memoList.importMarkdownUnsupported"),
+      });
+      return;
+    }
+
+    try {
+      const payload = await readMarkdownFile(file);
+      setTemplatesOpen(false);
+      setMobileBottomNavActive("home");
+      creatingMemoSelectionRef.current = true;
+      await createMemoMutation.mutateAsync({
+        notebookId: targetNotebookId,
+        title: payload.title,
+        contentMarkdown: payload.contentMarkdown,
+        tags: [],
+      });
+    } catch {
+      setAppNoticeDialog({
+        title: t("memoList.importMarkdownFailedTitle"),
+        description: t("memoList.importMarkdownReadFailed"),
+      });
+    }
+  };
+
   const handleSaveAsTemplate = async (memo: MemoDetail, name: string) => {
     await saveTemplateMutation.mutateAsync({ name, memoId: memo.id });
   };
@@ -2174,17 +2261,12 @@ export const WorkspaceApp = ({
     });
   };
 
-  const getMemoIdsNeedingMove = (memoIds: string[], targetNotebookId: string) => {
-    const memoNotebookMap = new Map(memos.map((memo) => [memo.id, memo.notebookId]));
-    return Array.from(new Set(memoIds.filter(Boolean))).filter((memoId) => memoNotebookMap.get(memoId) !== targetNotebookId);
-  };
-
   const handleMoveSelectedMemos = (targetNotebookId: string) => {
     if (selectedMemoIds.size === 0 || memoView === "trash") {
       return;
     }
 
-    const memoIds = getMemoIdsNeedingMove(Array.from(selectedMemoIds), targetNotebookId);
+    const memoIds = getMemoIdsNeedingMove(memos, Array.from(selectedMemoIds), targetNotebookId);
     if (memoIds.length === 0) {
       return;
     }
@@ -2200,7 +2282,7 @@ export const WorkspaceApp = ({
       return;
     }
 
-    const movableMemoIds = getMemoIdsNeedingMove(memoIds, targetNotebookId);
+    const movableMemoIds = getMemoIdsNeedingMove(memos, memoIds, targetNotebookId);
     if (movableMemoIds.length === 0) {
       return;
     }
@@ -2216,7 +2298,7 @@ export const WorkspaceApp = ({
       return;
     }
 
-    const memoIds = getMemoIdsNeedingMove([memoId], targetNotebookId);
+    const memoIds = getMemoIdsNeedingMove(memos, [memoId], targetNotebookId);
     if (memoIds.length === 0) {
       return;
     }
@@ -2265,6 +2347,60 @@ export const WorkspaceApp = ({
     });
   };
 
+  const handleExportSelectedMemos = () => {
+    if (selectedMemoIds.size === 0 || memoView === "trash" || isExportingSelectedMemos) {
+      return;
+    }
+
+    setIsExportingSelectedMemos(true);
+    setSelectedMarkdownExportProgress({ completed: 0, total: selectedMemoIds.size });
+    void exportSelectedMemosAsMarkdownZip({
+      memoIds: Array.from(selectedMemoIds),
+      listNotebooks: api.listNotebooks,
+      getPage: api.getMarkdownExportPage,
+      getResourceBlob: api.getResourceBlob,
+      onProgress: setSelectedMarkdownExportProgress,
+    }).then((result) => {
+      if (result.status === "too-many") {
+        setAppNoticeDialog({
+          title: t("workspace.selection.export"),
+          description: t("workspace.selection.exportTooMany", { max: result.max }),
+        });
+        return;
+      }
+      if (result.status === "local-only") {
+        setAppNoticeDialog({
+          title: t("workspace.selection.export"),
+          description: t("workspace.selection.exportLocalOnly"),
+        });
+        return;
+      }
+      if (result.status === "empty") {
+        setAppNoticeDialog({
+          title: t("workspace.selection.export"),
+          description: t("workspace.selection.exportEmpty"),
+        });
+        return;
+      }
+      if (result.skippedLocal > 0) {
+        setAppNoticeDialog({
+          title: t("workspace.selection.export"),
+          description: t("workspace.selection.exportCompleteWithSkipped", { count: result.skippedLocal }),
+        });
+      }
+    }).catch((error: unknown) => {
+      console.error("Failed to export selected notes as Markdown ZIP", error);
+      setAppNoticeDialog({
+        title: t("workspace.selection.export"),
+        description: error instanceof MarkdownExportMemoryLimitError
+          ? t("dataExport.largeBackupRequiresStreaming")
+          : t("workspace.selection.exportError"),
+      });
+    }).finally(() => {
+      setIsExportingSelectedMemos(false);
+    });
+  };
+
   const handleDeleteSelectedMemos = () => {
     if (selectedMemoIds.size === 0) {
       return;
@@ -2297,6 +2433,12 @@ export const WorkspaceApp = ({
         : pinMemosMutation.isPending
           ? t("workspace.selection.updatingPin")
           : selectionPinLabel;
+  const selectedMemosNeedingMove = getMemoIdsNeedingMove(
+    memos,
+    Array.from(selectedMemoIds),
+    selectionMoveTargetNotebookId
+  );
+  const canMoveSelectedMemos = selectedMemosNeedingMove.length > 0;
   const selectionMoveTitle =
     selectedMemoIds.size === 0
       ? t("workspace.selection.chooseMemo")
@@ -2306,7 +2448,9 @@ export const WorkspaceApp = ({
           ? t("workspace.selection.noMovableNotebook")
           : moveMemosMutation.isPending
             ? t("workspace.selection.moving")
-            : t("workspace.selection.move");
+            : !canMoveSelectedMemos
+              ? t("workspace.selection.alreadyInNotebook")
+              : t("workspace.selection.move");
   const selectionMergeTitle =
     selectedMemoIds.size < 2
       ? t("workspace.selection.needTwoMemos")
@@ -2315,6 +2459,17 @@ export const WorkspaceApp = ({
         : mergeMutation.isPending
           ? t("workspace.selection.merging")
           : t("workspace.selection.merge");
+  const selectionExportTitle =
+    selectedMemoIds.size === 0
+      ? t("workspace.selection.chooseMemo")
+      : memoView === "trash"
+        ? t("workspace.selection.trashCannotExport")
+        : isExportingSelectedMemos
+          ? t("workspace.selection.exportProgress", {
+            completed: selectedMarkdownExportProgress.completed,
+            total: selectedMarkdownExportProgress.total,
+          })
+          : t("workspace.selection.exportHint");
   const selectionDeleteTitle =
     selectedMemoIds.size === 0
       ? t("workspace.selection.chooseMemo")
@@ -2325,8 +2480,11 @@ export const WorkspaceApp = ({
           : t("workspace.selection.delete");
   const memoSelectionActionBar = memoSelectionModeActive ? (
     <MemoSelectionActionBar
+      canMove={canMoveSelectedMemos}
       deleteTitle={selectionDeleteTitle}
+      exportTitle={selectionExportTitle}
       isDeleting={deleteMemosMutation.isPending || deleteMemoMutation.isPending}
+      isExporting={isExportingSelectedMemos}
       isMerging={mergeMutation.isPending}
       isMoving={moveMemosMutation.isPending}
       isPinning={pinMemosMutation.isPending}
@@ -2337,6 +2495,7 @@ export const WorkspaceApp = ({
       moveTitle={selectionMoveTitle}
       onClearSelection={clearMemoSelection}
       onDelete={handleDeleteSelectedMemos}
+      onExport={handleExportSelectedMemos}
       onMerge={handleMerge}
       onMove={() => handleMoveSelectedMemos(selectionMoveTargetNotebookId)}
       onMoveTargetChange={setSelectionMoveTargetNotebookId}
@@ -3112,7 +3271,7 @@ export const WorkspaceApp = ({
           style={{ transform: `translateY(${Math.max(0, pullToRefreshDistance - 24)}px)` }}
           aria-hidden="true"
         >
-          <div className="inline-flex h-9 items-center gap-2 rounded-full border border-slate-200 bg-white/95 px-3 text-xs font-semibold text-slate-600 shadow-[0_10px_28px_rgba(15,23,42,0.12)] backdrop-blur">
+          <div className="inline-flex h-9 items-center gap-2 rounded-full border border-slate-200 bg-card/95 px-3 text-xs font-semibold text-slate-600 shadow-[0_10px_28px_rgba(15,23,42,0.12)] backdrop-blur">
             <RefreshCw className={cn("h-4 w-4 text-slate-500", (isPullRefreshing || pullToRefreshReady) && "animate-spin")} />
             <span>{pullToRefreshLabel}</span>
           </div>
@@ -3126,13 +3285,15 @@ export const WorkspaceApp = ({
               ? "edgeever-workspace-grid--focus"
               : rightView === "editor"
                 ? "edgeever-workspace-grid--editor"
-                : "edgeever-workspace-grid--single-right"
+                : "edgeever-workspace-grid--single-right",
+            !desktopFocusModeActive && desktopNotebookSidebarCollapsed && "edgeever-workspace-grid--sidebar-collapsed"
           )}
           style={{ "--memo-list-width": `${memoListWidth}px` } as CSSProperties}
         >
           <aside
+            id="edgeever-notebook-sidebar"
             className={cn(
-              "edgeever-workspace-sidebar min-h-0 border-r",
+              "edgeever-workspace-sidebar min-h-0 overflow-hidden border-r",
               desktopFocusModeActive
                 ? "hidden"
                 : visibleActivePane === "notebooks"
@@ -3196,6 +3357,8 @@ export const WorkspaceApp = ({
                   demoMode={demoMode}
                   onResetDemo={() => setDemoResetConfirmationOpen(true)}
                   isResettingDemo={resetDemoMutation.isPending}
+                  collapsed={desktopNotebookSidebarCollapsed}
+                  onToggleCollapsed={() => setNotebookSidebarCollapsed(!notebookSidebarCollapsed)}
                 />
               </Suspense>
             )}
@@ -3237,6 +3400,7 @@ export const WorkspaceApp = ({
               isError={memosQuery.isError}
               isCreating={createMemoMutation.isPending}
               isMerging={mergeMutation.isPending}
+              isExporting={isExportingSelectedMemos}
               isMoving={moveMemosMutation.isPending}
               isPinning={pinMemosMutation.isPending}
               isDeleting={deleteMemosMutation.isPending || deleteMemoMutation.isPending}
@@ -3246,6 +3410,7 @@ export const WorkspaceApp = ({
               onSearch={setSearch}
               onCancelMobileSearch={handleCancelMobileSearch}
               onCreateMemo={handleCreateMemo}
+              onImportMarkdownFiles={(files) => void handleImportMarkdownFiles(files)}
               onClearSelection={clearMemoSelection}
               onEnterSelectionMode={enterMemoSelectionMode}
               onReplaceSelection={replaceMemoSelection}
@@ -3316,6 +3481,7 @@ export const WorkspaceApp = ({
               }}
               onTogglePinMemo={handleToggleMemoPinned}
               onPinSelectedMemos={handlePinSelectedMemos}
+              onExportSelectedMemos={handleExportSelectedMemos}
               onDeleteSelectedMemos={handleDeleteSelectedMemos}
               onMoveSelectedMemos={handleMoveSelectedMemos}
               mobileListActionsOpen={mobileListActionsOpen}
@@ -3417,6 +3583,10 @@ export const WorkspaceApp = ({
                     <EvernoteImportGuidePane onClose={() => setRightView("settings")} onOpenExecutionCenter={handleOpenExecutionCenter} />
                   ) : rendererRecoveryMode ? (
                     <EditorRecoveryPane />
+                  ) : memoSelectionModeActive ? (
+                    <div className="flex h-full min-w-0 flex-col bg-card">
+                      {memoSelectionActionBar}
+                    </div>
                   ) : (
                     <EditorPaneErrorBoundary
                       resetKey={selectedMemo?.id ?? selectedMemoId}

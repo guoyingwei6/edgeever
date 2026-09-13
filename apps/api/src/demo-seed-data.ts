@@ -35,6 +35,7 @@ export const DEMO_SEED_MEMOS_ZH = [
 
 | 核心维度 | 传统商业云笔记 (如 Evernote) | 本地离线知识库 (如 Obsidian) | EdgeEver 极客知识库 |
 | :--- | :--- | :--- | :--- |
+| **源代码** | 闭源 | 核心闭源，文件开放 | **整栈开源 (AGPL-3.0)** |
 | **云端托管成本** | 商业订阅高昂（$10+/月） | 官方云同步收费（$5+/月） | **100% 永久免费 (Cloudflare 免费额度 / Docker 自建)** |
 | **数据资产所有权** | 专有格式封闭，导出困难 | 本地 Markdown，移动端同步繁琐 | **完全自主掌控 (D1 SQLite 数据库 / R2 / 无损 ZIP 导出)** |
 | **写作与编辑体验** | 仅富文本，排版易错乱 | 纯 Markdown，缺乏沉浸所见即所得 | **双视图自由切换 (所见即所得富文本 ⇄ Markdown 源码)** |
@@ -93,7 +94,7 @@ EdgeEver 将高效与优雅融入每一处交互细节，助你专注于思考�
 - **阅读保护模式 (Reading Protection)**：日常翻阅或查阅笔记时，按下 \`Cmd/Ctrl + E\` 即可一键开启只读保护，锁定当前编辑状态，避免沉浸阅读时误触键盘或意外改动笔记内容；再次按下即可随手切回编辑。
 
 ### 🎭 精选排版主题与一键自媒体发布
-- **内置排版主题**：支持一键切换 \`WeChat Classic Green (微信经典绿)\`、\`Modern Mint (薄荷青)\`、\`Minimal Emerald (极简祖母绿)\`、\`Outline Emerald (大纲祖母绿)\` 等风格。
+- **内置排版主题**：支持一键切换 \`微信绿\`、\`薄荷绿\`、\`极简绿\`、\`描边绿\`，以及暖笺、教程、蓝图等纸稿风格。
 - **一键排版复制**：专为内容创作者设计。点击顶部工具栏的**微信公众号图标**，系统自动将当前笔记转为内联 CSS 样式的优雅富文本，直接粘贴至微信公众号后台、Substack 或 WordPress，排版与代码高亮完美保真。
 
 ### 🖼️ 8 套精美社交分享海报 (Poster Cards)
@@ -253,6 +254,7 @@ export const DEMO_MEMO_ENGLISH = {
 
 | Dimension | Traditional Cloud Notes (e.g. Evernote) | Local Offline Notes (e.g. Obsidian) | EdgeEver Geek Knowledge Base |
 | :--- | :--- | :--- | :--- |
+| **Source Code** | Closed source | Closed-source core, open files | **Full-stack open source (AGPL-3.0)** |
 | **Hosting Cost** | Costly commercial subscriptions ($10+/mo) | Official cloud sync subscription ($5+/mo) | **100% Free Forever (Cloudflare Free Tier / Docker Self-Hosted)** |
 | **Data Ownership** | Proprietary lock-in, hard to export | Local Markdown, cumbersome mobile sync | **Full Ownership (D1 SQLite, R2 Storage, Lossless ZIP Archives)** |
 | **Editing Experience** | Rich text only, fragile formatting | Plain Markdown, lacks WYSIWYG flow | **Seamless Dual-View (WYSIWYG Rich Text ⇄ Markdown Source)** |
@@ -311,7 +313,7 @@ EdgeEver is engineered to provide a distraction-free, elegant writing experience
 - **Reading Protection Mode**: When reading or reviewing notes, press \`Cmd/Ctrl + E\` to toggle read-only protection, locking the editor to prevent accidental edits while browsing; press it again to seamlessly resume editing.
 
 ### 🎭 Curated Typography Themes & Publishing Export
-- **Preset Editor Themes**: Switch effortlessly between \`WeChat Classic Green\`, \`Modern Mint\`, \`Minimal Emerald\`, \`Outline Emerald\`, and more.
+- **Preset Editor Themes**: Switch effortlessly between \`WeChat Green\`, \`Mint Green\`, \`Minimal Green\`, \`Ruled Green\`, and paper styles such as Letter, Guide, and Blueprint.
 - **One-Click Publishing Export**: Built for publishers and bloggers. Click the **WeChat Icon** in the top bar to format your note with inline CSS. Paste directly into WeChat Official Account editor, Substack, Medium, or WordPress while preserving layout and syntax highlighting.
 
 ### 🖼️ 8 Exquisite Social Poster Themes
