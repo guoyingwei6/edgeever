@@ -41,10 +41,10 @@ describe("native mobile AI note assistant", () => {
   });
 
   test("streams AI output from the shared workspace configuration on both clients", () => {
-    expect(androidAssistantSource).toContain("resolveAiAssistantLastAction");
+    expect(androidAssistantSource).toContain("resolveAiAssistantOpenAction");
     expect(androidAssistantSource).toContain("readMobileAiAssistantLastAction");
     expect(androidEditorSource).toContain("readStoredAiAssistantLastActionPreference");
-    expect(androidEditorSource).toContain("resolveAiAssistantLastAction");
+    expect(androidEditorSource).toContain("resolveAiAssistantOpenAction");
     expect(iosAssistantSource).toContain("lastAiAssistantAction");
     expect(iosAssistantSource).toContain("applyStoredOrDefaultAction");
     expect(readSource("../apps/ios/EdgeEver/Data/Preferences/PreferencesStore.swift")).toContain("edgeever.aiAssistant.lastAction");
@@ -79,7 +79,7 @@ describe("native mobile AI note assistant", () => {
   });
 
   test("keeps the assistant reachable from each native note action menu", () => {
-    expect(androidDetailSource).toContain('label={resolvedLocale === "en-US" ? "AI note assistant" : "AI 笔记助手"}');
+    expect(androidDetailSource).toContain('label={resolvedLocale !== "zh-CN" ? "AI note assistant" : "AI 笔记助手"}');
     expect(androidDetailSource).toContain("setAiAssistantOpen(true)");
     expect(androidDetailSource).toContain("<MobileAiAssistantModal");
     expect(iosDetailSource).toContain('env.preferences.t("AI 笔记助手", en: "AI note assistant")');

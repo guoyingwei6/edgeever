@@ -481,6 +481,9 @@ input {
   user-select: text;
   caret-color: auto;
   white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: break-word;
+  font-feature-settings: "chws" 1;
 }
 
 /* Keep semantic emphasis visible even though the standalone shell disables
@@ -910,6 +913,8 @@ html.dark .edgeever-mobile-tiptap-content a:hover {
 .edgeever-mobile-tiptap-content th p,
 .edgeever-mobile-tiptap-content td p {
   margin: 0;
+  letter-spacing: inherit;
+  line-height: inherit;
 }
 
 .edgeever-mobile-tiptap-content .selectedCell::after {

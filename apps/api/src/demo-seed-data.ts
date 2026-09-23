@@ -1,3 +1,4 @@
+import { serializeDiagramDocument, type DiagramDocument } from "@edgeever/shared";
 import {
   decodeDemoAttachment,
   DEMO_ATTACHMENT_MARKDOWN_EN,
@@ -16,6 +17,214 @@ export const DEMO_SEED_NOTEBOOKS = [
   { id: "nb_demo_features", parentId: "nb_projects", name: "功能演示", slug: "demo-features", icon: "notebook", color: "#0891b2", sortOrder: 21 },
   { id: "nb_demo_features_en", parentId: "nb_projects", name: "Feature Demos", slug: "feature-demos", icon: "notebook", color: "#0e7490", sortOrder: 22 },
 ];
+
+export const DEMO_ARCHITECTURE_DIAGRAM_ZH: DiagramDocument = {
+  schemaVersion: 2,
+  kind: "architecture",
+  nodes: [
+    { id: "boundary-clients", label: "全端体验层", x: 32, y: 32, width: 260, height: 694, shape: "boundary" },
+    { id: "boundary-platform", label: "可移植应用平台 · Cloudflare Workers / Docker 共用业务核心", x: 380, y: 179, width: 732, height: 400, shape: "boundary" },
+    { id: "boundary-data", label: "数据与文件层 · 可替换基础设施适配器", x: 1200, y: 390, width: 260, height: 380, shape: "boundary" },
+    { id: "boundary-ecosystem", label: "AI 与自动化生态", x: 1200, y: 62, width: 260, height: 272, shape: "boundary" },
+
+    { id: "client-web", label: "Web / PWA\n离线优先", x: 68, y: 88, width: 156, height: 64, shape: "frontend", resourceIcon: "webApp", parentId: "boundary-clients" },
+    { id: "client-desktop", label: "macOS / Windows\n桌面端", x: 68, y: 192, width: 156, height: 70, shape: "client", resourceIcon: "client", parentId: "boundary-clients" },
+    { id: "client-ios", label: "iOS\nSwiftUI 原生端", x: 68, y: 302, width: 156, height: 70, shape: "client", resourceIcon: "mobileApp", parentId: "boundary-clients" },
+    { id: "client-android", label: "Android\nExpo 原生端", x: 68, y: 412, width: 156, height: 64, shape: "client", resourceIcon: "mobileApp", parentId: "boundary-clients" },
+    { id: "client-clipper", label: "浏览器剪藏\nChrome / Edge", x: 68, y: 516, width: 156, height: 70, shape: "client", resourceIcon: "website", parentId: "boundary-clients" },
+    { id: "client-sync", label: "全端共享同步通道", x: 68, y: 626, width: 156, height: 64, shape: "service", resourceIcon: "apiClient", parentId: "boundary-clients" },
+
+    { id: "platform-api", label: "统一 API 入口\n认证 · 限流 · 路由", x: 416, y: 363, width: 156, height: 70, shape: "service", resourceIcon: "apiGateway", parentId: "boundary-platform" },
+    { id: "platform-core", label: "共享业务核心\nHono · 领域服务", x: 668, y: 304, width: 156, height: 70, shape: "service", resourceIcon: "service", parentId: "boundary-platform" },
+    { id: "platform-sync", label: "同步与修订引擎\n离线队列 · 冲突控制", x: 920, y: 295, width: 156, height: 88, shape: "service", resourceIcon: "streamProcessing", parentId: "boundary-platform" },
+    { id: "platform-mcp", label: "原生 MCP 端点\n智能体读写工具", x: 416, y: 235, width: 156, height: 88, shape: "service", resourceIcon: "mcpServer", parentId: "boundary-platform" },
+    { id: "platform-model", label: "端侧模型网关\nBYOK 隐私直连", x: 416, y: 473, width: 156, height: 70, shape: "service", resourceIcon: "modelGateway", parentId: "boundary-platform" },
+
+    { id: "data-search", label: "搜索与语义索引\n全文 · 向量", x: 1239, y: 446, width: 150, height: 72, shape: "database", resourceIcon: "vectorDatabase", parentId: "boundary-data" },
+    { id: "data-sql", label: "D1 / SQLite\n笔记 · 标签 · 修订", x: 1239, y: 558, width: 150, height: 72, shape: "database", resourceIcon: "relationalDatabase", parentId: "boundary-data" },
+    { id: "data-objects", label: "R2 / S3\n图片与附件", x: 1236, y: 670, width: 156, height: 64, shape: "storage", resourceIcon: "objectStorage", parentId: "boundary-data" },
+
+    { id: "ecosystem-agents", label: "Claude / Cursor\n自动化智能体", x: 1236, y: 118, width: 156, height: 70, shape: "external", resourceIcon: "aiAgent", parentId: "boundary-ecosystem" },
+    { id: "ecosystem-models", label: "OpenAI / Gemini\n兼容模型服务", x: 1236, y: 228, width: 156, height: 70, shape: "external", resourceIcon: "largeLanguageModel", parentId: "boundary-ecosystem" },
+  ],
+  edges: [
+    { id: "edge-clients-api", source: "client-sync", target: "platform-api", label: "HTTPS / 同步游标", kind: "request" },
+    { id: "edge-api-core", source: "platform-api", target: "platform-core", label: "统一领域接口", kind: "request" },
+    { id: "edge-core-sync", source: "platform-core", target: "platform-sync", label: "变更日志", kind: "async", bidirectional: true },
+    { id: "edge-mcp-core", source: "platform-mcp", target: "platform-core", label: "受控读写", kind: "request", bidirectional: true },
+    { id: "edge-core-sql", source: "platform-core", target: "data-sql", label: "事务", kind: "data" },
+    { id: "edge-core-objects", source: "platform-core", target: "data-objects", label: "对象存取", kind: "data" },
+    { id: "edge-sync-search", source: "platform-sync", target: "data-search", label: "增量索引", kind: "data" },
+    { id: "edge-agents-mcp", source: "ecosystem-agents", target: "platform-mcp", label: "MCP Tools", kind: "request", bidirectional: true },
+    { id: "edge-model-gateway", source: "platform-model", target: "ecosystem-models", label: "用户密钥直连", kind: "request", bidirectional: true },
+  ],
+};
+
+export const DEMO_ARCHITECTURE_DIAGRAM_EN: DiagramDocument = {
+  schemaVersion: 2,
+  kind: "architecture",
+  nodes: [
+    { id: "boundary-clients", label: "Cross-Platform Experience", x: 32, y: 43, width: 260, height: 694, shape: "boundary" },
+    { id: "boundary-platform", label: "Portable Application Platform · Shared Core on Cloudflare Workers or Docker", x: 380, y: 181, width: 732, height: 418, shape: "boundary" },
+    { id: "boundary-data", label: "Data & Files · Replaceable Infrastructure Adapters", x: 1200, y: 396, width: 260, height: 436, shape: "boundary" },
+    { id: "boundary-ecosystem", label: "AI & Automation Ecosystem", x: 1200, y: 32, width: 260, height: 308, shape: "boundary" },
+
+    { id: "client-web", label: "Web / PWA\nOffline First", x: 68, y: 99, width: 156, height: 64, shape: "frontend", resourceIcon: "webApp", parentId: "boundary-clients" },
+    { id: "client-desktop", label: "macOS / Windows\nDesktop", x: 68, y: 203, width: 156, height: 70, shape: "client", resourceIcon: "client", parentId: "boundary-clients" },
+    { id: "client-ios", label: "iOS\nNative SwiftUI", x: 68, y: 313, width: 156, height: 70, shape: "client", resourceIcon: "mobileApp", parentId: "boundary-clients" },
+    { id: "client-android", label: "Android\nNative Expo", x: 68, y: 423, width: 156, height: 64, shape: "client", resourceIcon: "mobileApp", parentId: "boundary-clients" },
+    { id: "client-clipper", label: "Web Clipper\nChrome / Edge", x: 68, y: 527, width: 156, height: 70, shape: "client", resourceIcon: "website", parentId: "boundary-clients" },
+    { id: "client-sync", label: "Shared Cross-Client Sync", x: 68, y: 637, width: 156, height: 64, shape: "service", resourceIcon: "apiClient", parentId: "boundary-clients" },
+
+    { id: "platform-api", label: "Unified API Entry\nAuth · Limits · Routing", x: 416, y: 365, width: 156, height: 88, shape: "service", resourceIcon: "apiGateway", parentId: "boundary-platform" },
+    { id: "platform-core", label: "Shared Business Core\nHono · Domain Services", x: 668, y: 301, width: 156, height: 88, shape: "service", resourceIcon: "service", parentId: "boundary-platform" },
+    { id: "platform-sync", label: "Sync & Revision Engine\nOffline Queue · Conflicts", x: 920, y: 301, width: 156, height: 88, shape: "service", resourceIcon: "streamProcessing", parentId: "boundary-platform" },
+    { id: "platform-mcp", label: "Native MCP Endpoint\nAgent Read/Write Tools", x: 416, y: 237, width: 156, height: 88, shape: "service", resourceIcon: "mcpServer", parentId: "boundary-platform" },
+    { id: "platform-model", label: "Client Model Gateway\nPrivate BYOK", x: 416, y: 493, width: 156, height: 70, shape: "service", resourceIcon: "modelGateway", parentId: "boundary-platform" },
+
+    { id: "data-search", label: "Search & Semantic Index\nFull Text · Vectors", x: 1239, y: 452, width: 150, height: 106, shape: "database", resourceIcon: "vectorDatabase", parentId: "boundary-data" },
+    { id: "data-sql", label: "D1 / SQLite\nNotes · Tags · Revisions", x: 1239, y: 598, width: 150, height: 88, shape: "database", resourceIcon: "relationalDatabase", parentId: "boundary-data" },
+    { id: "data-objects", label: "R2 / S3\nImages & Attachments", x: 1236, y: 726, width: 156, height: 70, shape: "storage", resourceIcon: "objectStorage", parentId: "boundary-data" },
+
+    { id: "ecosystem-agents", label: "Claude / Cursor\nAutomation Agents", x: 1236, y: 88, width: 156, height: 88, shape: "external", resourceIcon: "aiAgent", parentId: "boundary-ecosystem" },
+    { id: "ecosystem-models", label: "OpenAI / Gemini\nCompatible Models", x: 1236, y: 216, width: 156, height: 88, shape: "external", resourceIcon: "largeLanguageModel", parentId: "boundary-ecosystem" },
+  ],
+  edges: [
+    { id: "edge-clients-api", source: "client-sync", target: "platform-api", label: "HTTPS / Sync Cursor", kind: "request" },
+    { id: "edge-api-core", source: "platform-api", target: "platform-core", label: "Domain API", kind: "request" },
+    { id: "edge-core-sync", source: "platform-core", target: "platform-sync", label: "Change Log", kind: "async", bidirectional: true },
+    { id: "edge-mcp-core", source: "platform-mcp", target: "platform-core", label: "Governed Access", kind: "request", bidirectional: true },
+    { id: "edge-core-sql", source: "platform-core", target: "data-sql", label: "Transactions", kind: "data" },
+    { id: "edge-core-objects", source: "platform-core", target: "data-objects", label: "Objects", kind: "data" },
+    { id: "edge-sync-search", source: "platform-sync", target: "data-search", label: "Incremental Index", kind: "data" },
+    { id: "edge-agents-mcp", source: "ecosystem-agents", target: "platform-mcp", label: "MCP Tools", kind: "request", bidirectional: true },
+    { id: "edge-model-gateway", source: "platform-model", target: "ecosystem-models", label: "User-Key Direct", kind: "request", bidirectional: true },
+  ],
+};
+
+export const DEMO_FLOWCHART_DIAGRAM_ZH: DiagramDocument = {
+  schemaVersion: 1,
+  kind: "flowchart",
+  theme: "mint",
+  nodes: [
+    { id: "capture", label: "捕捉灵感", x: 72, y: 176, width: 136, height: 48, shape: "terminator" },
+    { id: "enrich", label: "补充正文、标签与附件", x: 264, y: 168, width: 184, height: 64, shape: "process" },
+    { id: "organized", label: "已经适合归档？", x: 516, y: 164, width: 164, height: 72, shape: "decision" },
+    { id: "inbox", label: "放入“等待分类”", x: 516, y: 304, width: 164, height: 56, shape: "process" },
+    { id: "notebook", label: "归入项目或主题笔记本", x: 748, y: 168, width: 184, height: 64, shape: "process" },
+    { id: "ai", label: "AI 提炼摘要与行动项", x: 748, y: 304, width: 184, height: 64, shape: "process" },
+    { id: "publish", label: "发布、分享或持续迭代", x: 1000, y: 176, width: 184, height: 48, shape: "terminator" },
+  ],
+  edges: [
+    { id: "capture-enrich", source: "capture", target: "enrich" },
+    { id: "enrich-organized", source: "enrich", target: "organized" },
+    { id: "organized-notebook", source: "organized", target: "notebook", label: "是" },
+    { id: "organized-inbox", source: "organized", target: "inbox", label: "否" },
+    { id: "inbox-ai", source: "inbox", target: "ai", label: "稍后整理" },
+    { id: "notebook-publish", source: "notebook", target: "publish" },
+    { id: "ai-publish", source: "ai", target: "publish" },
+  ],
+};
+
+export const DEMO_FLOWCHART_DIAGRAM_EN: DiagramDocument = {
+  schemaVersion: 1,
+  kind: "flowchart",
+  theme: "mint",
+  nodes: [
+    { id: "capture", label: "Capture an idea", x: 72, y: 176, width: 136, height: 48, shape: "terminator" },
+    { id: "enrich", label: "Add content, tags & files", x: 264, y: 168, width: 184, height: 64, shape: "process" },
+    { id: "organized", label: "Ready to organize?", x: 516, y: 164, width: 164, height: 72, shape: "decision" },
+    { id: "inbox", label: "Keep in Inbox", x: 516, y: 304, width: 164, height: 56, shape: "process" },
+    { id: "notebook", label: "Move to a project or topic", x: 748, y: 168, width: 184, height: 64, shape: "process" },
+    { id: "ai", label: "Let AI extract summary & actions", x: 748, y: 304, width: 184, height: 64, shape: "process" },
+    { id: "publish", label: "Publish, share, or iterate", x: 1000, y: 176, width: 184, height: 48, shape: "terminator" },
+  ],
+  edges: [
+    { id: "capture-enrich", source: "capture", target: "enrich" },
+    { id: "enrich-organized", source: "enrich", target: "organized" },
+    { id: "organized-notebook", source: "organized", target: "notebook", label: "Yes" },
+    { id: "organized-inbox", source: "organized", target: "inbox", label: "Not yet" },
+    { id: "inbox-ai", source: "inbox", target: "ai", label: "Review later" },
+    { id: "notebook-publish", source: "notebook", target: "publish" },
+    { id: "ai-publish", source: "ai", target: "publish" },
+  ],
+};
+
+export const DEMO_MIND_MAP_DIAGRAM_ZH: DiagramDocument = {
+  schemaVersion: 1,
+  kind: "mind-map",
+  theme: "brand",
+  structure: "map",
+  nodes: [
+    { id: "root", label: "我的第二大脑", x: 72, y: 216, width: 152, height: 52, shape: "topic" },
+    { id: "capture", label: "采集", x: 304, y: 72, width: 112, height: 42, shape: "topic", parentId: "root" },
+    { id: "organize", label: "组织", x: 304, y: 176, width: 112, height: 42, shape: "topic", parentId: "root" },
+    { id: "connect", label: "连接", x: 304, y: 280, width: 112, height: 42, shape: "topic", parentId: "root" },
+    { id: "create", label: "创造", x: 304, y: 384, width: 112, height: 42, shape: "topic", parentId: "root" },
+    { id: "capture-clip", label: "网页剪藏", x: 520, y: 32, width: 112, height: 36, shape: "topic", parentId: "capture" },
+    { id: "capture-quick", label: "随手记录", x: 520, y: 88, width: 112, height: 36, shape: "topic", parentId: "capture" },
+    { id: "capture-files", label: "图片与附件", x: 520, y: 144, width: 112, height: 36, shape: "topic", parentId: "capture" },
+    { id: "organize-notebooks", label: "树状笔记本", x: 520, y: 200, width: 112, height: 36, shape: "topic", parentId: "organize" },
+    { id: "organize-tags", label: "标签与搜索", x: 520, y: 256, width: 112, height: 36, shape: "topic", parentId: "organize" },
+    { id: "connect-links", label: "双向链接", x: 520, y: 312, width: 112, height: 36, shape: "topic", parentId: "connect" },
+    { id: "connect-mcp", label: "MCP 智能体", x: 520, y: 368, width: 112, height: 36, shape: "topic", parentId: "connect" },
+    { id: "create-writing", label: "沉浸写作", x: 520, y: 424, width: 112, height: 36, shape: "topic", parentId: "create" },
+    { id: "create-share", label: "发布与分享", x: 520, y: 480, width: 112, height: 36, shape: "topic", parentId: "create" },
+  ],
+  edges: [
+    { id: "edge-root-capture", source: "root", target: "capture" },
+    { id: "edge-root-organize", source: "root", target: "organize" },
+    { id: "edge-root-connect", source: "root", target: "connect" },
+    { id: "edge-root-create", source: "root", target: "create" },
+    { id: "edge-capture-clip", source: "capture", target: "capture-clip" },
+    { id: "edge-capture-quick", source: "capture", target: "capture-quick" },
+    { id: "edge-capture-files", source: "capture", target: "capture-files" },
+    { id: "edge-organize-notebooks", source: "organize", target: "organize-notebooks" },
+    { id: "edge-organize-tags", source: "organize", target: "organize-tags" },
+    { id: "edge-connect-links", source: "connect", target: "connect-links" },
+    { id: "edge-connect-mcp", source: "connect", target: "connect-mcp" },
+    { id: "edge-create-writing", source: "create", target: "create-writing" },
+    { id: "edge-create-share", source: "create", target: "create-share" },
+  ],
+};
+
+export const DEMO_MIND_MAP_DIAGRAM_EN: DiagramDocument = {
+  schemaVersion: 1,
+  kind: "mind-map",
+  theme: "brand",
+  structure: "map",
+  nodes: [
+    { id: "root", label: "My Second Brain", x: 72, y: 216, width: 152, height: 52, shape: "topic" },
+    { id: "capture", label: "Capture", x: 304, y: 72, width: 112, height: 42, shape: "topic", parentId: "root" },
+    { id: "organize", label: "Organize", x: 304, y: 176, width: 112, height: 42, shape: "topic", parentId: "root" },
+    { id: "connect", label: "Connect", x: 304, y: 280, width: 112, height: 42, shape: "topic", parentId: "root" },
+    { id: "create", label: "Create", x: 304, y: 384, width: 112, height: 42, shape: "topic", parentId: "root" },
+    { id: "capture-clip", label: "Web clipping", x: 520, y: 32, width: 112, height: 36, shape: "topic", parentId: "capture" },
+    { id: "capture-quick", label: "Quick notes", x: 520, y: 88, width: 112, height: 36, shape: "topic", parentId: "capture" },
+    { id: "capture-files", label: "Images & files", x: 520, y: 144, width: 112, height: 36, shape: "topic", parentId: "capture" },
+    { id: "organize-notebooks", label: "Notebook tree", x: 520, y: 200, width: 112, height: 36, shape: "topic", parentId: "organize" },
+    { id: "organize-tags", label: "Tags & search", x: 520, y: 256, width: 112, height: 36, shape: "topic", parentId: "organize" },
+    { id: "connect-links", label: "Backlinks", x: 520, y: 312, width: 112, height: 36, shape: "topic", parentId: "connect" },
+    { id: "connect-mcp", label: "MCP agents", x: 520, y: 368, width: 112, height: 36, shape: "topic", parentId: "connect" },
+    { id: "create-writing", label: "Focused writing", x: 520, y: 424, width: 112, height: 36, shape: "topic", parentId: "create" },
+    { id: "create-share", label: "Publish & share", x: 520, y: 480, width: 112, height: 36, shape: "topic", parentId: "create" },
+  ],
+  edges: [
+    { id: "edge-root-capture", source: "root", target: "capture" },
+    { id: "edge-root-organize", source: "root", target: "organize" },
+    { id: "edge-root-connect", source: "root", target: "connect" },
+    { id: "edge-root-create", source: "root", target: "create" },
+    { id: "edge-capture-clip", source: "capture", target: "capture-clip" },
+    { id: "edge-capture-quick", source: "capture", target: "capture-quick" },
+    { id: "edge-capture-files", source: "capture", target: "capture-files" },
+    { id: "edge-organize-notebooks", source: "organize", target: "organize-notebooks" },
+    { id: "edge-organize-tags", source: "organize", target: "organize-tags" },
+    { id: "edge-connect-links", source: "connect", target: "connect-links" },
+    { id: "edge-connect-mcp", source: "connect", target: "connect-mcp" },
+    { id: "edge-create-writing", source: "create", target: "create-writing" },
+    { id: "edge-create-share", source: "create", target: "create-share" },
+  ],
+};
 
 export const DEMO_SEED_MEMOS_ZH = [
   {
@@ -94,7 +303,7 @@ EdgeEver 将高效与优雅融入每一处交互细节，助你专注于思考�
 - **阅读保护模式 (Reading Protection)**：日常翻阅或查阅笔记时，按下 \`Cmd/Ctrl + E\` 即可一键开启只读保护，锁定当前编辑状态，避免沉浸阅读时误触键盘或意外改动笔记内容；再次按下即可随手切回编辑。
 
 ### 🎭 精选排版主题与一键自媒体发布
-- **内置排版主题**：支持一键切换 \`微信绿\`、\`薄荷绿\`、\`极简绿\`、\`描边绿\`，以及暖笺、教程、蓝图等纸稿风格。
+- **内置排版主题**：支持一键切换 \`微信新绿\`、\`薄荷清新\`、\`极简青翠\`、\`线描翠绿\`，以及日暖素笺、青页讲义、夜蓝制图等排版风格。
 - **一键排版复制**：专为内容创作者设计。点击顶部工具栏的**微信公众号图标**，系统自动将当前笔记转为内联 CSS 样式的优雅富文本，直接粘贴至微信公众号后台、Substack 或 WordPress，排版与代码高亮完美保真。
 
 ### 🖼️ 8 套精美社交分享海报 (Poster Cards)
@@ -159,7 +368,7 @@ sequenceDiagram
 在正文空白行直接按下 **\`空格键 (Space)\`**、输入 **\`/ai\`**、通过 **\`/\`** 斜杠指令菜单，或选中文本点击浮动工具栏中的 **AI 按钮**，即可即时呼出 AI 写作助手面板：
 - **精炼总结与要点提取**：一键压缩提炼全文核心结论、提取待办事项与关键行动项；
 - **格式保真智能翻译**：在严格保留原有 Markdown、数学公式、链接与代码块的前提下，精准翻译多国语言；
-- **内容重塑与风格改写**：支持改进表达、修正错别字与语法、转为社交媒体（如小红书/推特）风格，或按上下文顺滑续写；
+- **内容重塑与续写**：支持润色与精炼表达，或按上下文顺滑续写；
 - **BYOK 隐私直连 (Bring Your Own Key)**：支持直连 OpenAI、Anthropic Claude、Google Gemini、DeepSeek 及各类 OpenAI 兼容的中继 API，数据完全由端侧直发，不经过任何第三方中转。
 
 ### 2️⃣ 开放 MCP 协议 (Model Context Protocol)
@@ -219,6 +428,30 @@ sequenceDiagram
 > 6. 随时在侧边栏或设置中点击 **“恢复 Demo 数据”**，一键重置演示工作区。
 `,
   },
+  {
+    id: "memo_demo_architecture",
+    notebookId: "nb_demo_features",
+    title: "🏗️ 系统架构：EdgeEver 可移植全栈与 AI 协同",
+    tags: ["architecture", "diagram", "portable-runtime", "cloud-native", "mcp"],
+    isPinned: false,
+    markdown: serializeDiagramDocument(DEMO_ARCHITECTURE_DIAGRAM_ZH),
+  },
+  {
+    id: "memo_demo_flowchart",
+    notebookId: "nb_demo_features",
+    title: "🔀 知识工作流：从捕捉灵感到发布分享的流程图",
+    tags: ["flowchart", "diagram", "workflow", "knowledge-management"],
+    isPinned: false,
+    markdown: serializeDiagramDocument(DEMO_FLOWCHART_DIAGRAM_ZH),
+  },
+  {
+    id: "memo_demo_mind_map",
+    notebookId: "nb_demo_features",
+    title: "🧠 第二大脑：个人知识管理体系思维导图",
+    tags: ["mind-map", "diagram", "second-brain", "knowledge-management"],
+    isPinned: false,
+    markdown: serializeDiagramDocument(DEMO_MIND_MAP_DIAGRAM_ZH),
+  },
 ];
 
 export const DEMO_SEED_REVISIONS = [
@@ -237,6 +470,20 @@ export const DEMO_SEED_REVISIONS = [
     title: "🌿 Welcome to EdgeEver: Modern Open-Source Knowledge Base for Geeks & Creators",
     markdown:
       "## 🌿 Welcome to EdgeEver (Initial Draft)\n\n- Classic Evernote 3-pane layout & Serverless self-hosted\n- Visual table editing & Markdown source toggle\n- Native MCP & AI agent synergy",
+  },
+  {
+    id: "rev_demo_architecture_1",
+    memoId: "memo_demo_architecture",
+    revision: 1,
+    title: "🏗️ 系统架构：EdgeEver 可移植全栈与 AI 协同",
+    markdown: serializeDiagramDocument(DEMO_ARCHITECTURE_DIAGRAM_ZH),
+  },
+  {
+    id: "rev_demo_architecture_1_en",
+    memoId: "memo_demo_architecture_en",
+    revision: 1,
+    title: "🏗️ System Architecture: EdgeEver Portable Full Stack & AI Collaboration",
+    markdown: serializeDiagramDocument(DEMO_ARCHITECTURE_DIAGRAM_EN),
   },
 ];
 
@@ -313,7 +560,7 @@ EdgeEver is engineered to provide a distraction-free, elegant writing experience
 - **Reading Protection Mode**: When reading or reviewing notes, press \`Cmd/Ctrl + E\` to toggle read-only protection, locking the editor to prevent accidental edits while browsing; press it again to seamlessly resume editing.
 
 ### 🎭 Curated Typography Themes & Publishing Export
-- **Preset Editor Themes**: Switch effortlessly between \`WeChat Green\`, \`Mint Green\`, \`Minimal Green\`, \`Ruled Green\`, and paper styles such as Letter, Guide, and Blueprint.
+- **Preset Editor Themes**: Switch effortlessly between \`WeChat Green\`, \`Fresh Mint\`, \`Minimal Jade\`, \`Lined Jade\`, and styles such as Warm Page, Lesson Page, and Navy Draft.
 - **One-Click Publishing Export**: Built for publishers and bloggers. Click the **WeChat Icon** in the top bar to format your note with inline CSS. Paste directly into WeChat Official Account editor, Substack, Medium, or WordPress while preserving layout and syntax highlighting.
 
 ### 🖼️ 8 Exquisite Social Poster Themes
@@ -378,7 +625,7 @@ sequenceDiagram
 Press the **\`Space\` bar** in an empty block, type **\`/ai\`**, use the **\`/\`** slash command menu, or select text and click the **AI button** on the floating toolbar to instantly summon the AI writing assistant:
 - **Summarization & Action Items**: Condense documents into key takeaways, conclusions, and actionable todos;
 - **Format-Preserving Translation**: Translate accurately into multiple languages while strictly preserving Markdown, math equations, links, and code blocks;
-- **Rewriting & Style Transformation**: Improve phrasing, fix spelling/grammar, adapt to social media styles (e.g. Xiaohongshu / Twitter), or continue writing seamlessly;
+- **Rewriting & Continuation**: Polish phrasing, make writing concise, or continue writing seamlessly;
 - **BYOK Direct Key (Bring Your Own Key)**: Direct client-side connection with OpenAI, Anthropic Claude, Google Gemini, DeepSeek, and OpenAI-compatible relays with zero third-party data transit.
 
 ### 2️⃣ Model Context Protocol (MCP) Integration
@@ -438,6 +685,18 @@ Export your entire library at any time from **Profile → Import and export**. T
 > 6. Click **"Reset Demo Data"** in settings or the sidebar anytime to restore the demo workspace.
 `,
   },
+  memo_demo_architecture: {
+    title: "🏗️ System Architecture: EdgeEver Portable Full Stack & AI Collaboration",
+    markdown: serializeDiagramDocument(DEMO_ARCHITECTURE_DIAGRAM_EN),
+  },
+  memo_demo_flowchart: {
+    title: "🔀 Knowledge Workflow: From Capturing Ideas to Publishing",
+    markdown: serializeDiagramDocument(DEMO_FLOWCHART_DIAGRAM_EN),
+  },
+  memo_demo_mind_map: {
+    title: "🧠 Second Brain: A Personal Knowledge System Mind Map",
+    markdown: serializeDiagramDocument(DEMO_MIND_MAP_DIAGRAM_EN),
+  },
 } as const;
 
 export const DEMO_SEED_MEMOS_EN = DEMO_SEED_MEMOS_ZH.map((memo) => {
@@ -451,13 +710,13 @@ export const DEMO_SEED_MEMOS_EN = DEMO_SEED_MEMOS_ZH.map((memo) => {
     id: `${memo.id}_en`,
     notebookId: "nb_demo_features_en",
     title: english.title,
-    markdown: `${english.markdown}${DEMO_ATTACHMENT_MARKDOWN_EN}`,
+    markdown: memo.id === "memo_demo_overview" ? `${english.markdown}${DEMO_ATTACHMENT_MARKDOWN_EN}` : english.markdown,
   };
 }).filter((memo): memo is NonNullable<typeof memo> => memo !== null);
 
 export const DEMO_SEED_MEMOS_ZH_WITH_ATTACHMENTS = DEMO_SEED_MEMOS_ZH.map((memo) => ({
   ...memo,
-  markdown: `${memo.markdown}${DEMO_ATTACHMENT_MARKDOWN_ZH}`,
+  markdown: memo.id === "memo_demo_overview" ? `${memo.markdown}${DEMO_ATTACHMENT_MARKDOWN_ZH}` : memo.markdown,
 }));
 
 export const DEMO_SEED_MEMOS = [...DEMO_SEED_MEMOS_ZH_WITH_ATTACHMENTS, ...DEMO_SEED_MEMOS_EN];

@@ -1,5 +1,29 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
+const normalizeIpcBytes = (value) => {
+  if (value instanceof Uint8Array) {
+    const copy = new Uint8Array(value.byteLength);
+    copy.set(value);
+    return copy;
+  }
+  if (value instanceof ArrayBuffer) {
+    return new Uint8Array(value.slice(0));
+  }
+  if (ArrayBuffer.isView(value)) {
+    return new Uint8Array(value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength));
+  }
+  if (Array.isArray(value)) {
+    return Uint8Array.from(value);
+  }
+  if (value && typeof value === "object" && value.type === "Buffer") {
+    return normalizeIpcBytes(value.data);
+  }
+  return new Uint8Array();
+};
+
+let screenshotImportListener = null;
+let rendererReadySent = false;
+
 contextBridge.exposeInMainWorld("edgeeverDesktop", Object.freeze({
   isAvailable: true,
   canClearLocalData: ipcRenderer.sendSync("desktop:local-data-reset-available-sync"),
@@ -12,6 +36,7 @@ contextBridge.exposeInMainWorld("edgeeverDesktop", Object.freeze({
   getSessionToken: () => ipcRenderer.sendSync("desktop:session-token-sync"),
   copyText: (value) => ipcRenderer.invoke("desktop:copy-text", value),
   copyHtml: (html, plainText) => ipcRenderer.invoke("desktop:copy-html", { html, plainText }),
+  copyImage: (bytes) => ipcRenderer.invoke("desktop:copy-image", bytes),
   setSessionToken: (value) => ipcRenderer.invoke("desktop:set-session-token", value),
   clearSessionToken: () => ipcRenderer.invoke("desktop:clear-session-token"),
   publicNetworkFetch: (requestId, input) => ipcRenderer.invoke("desktop:public-network-fetch", requestId, input),
@@ -42,6 +67,8 @@ contextBridge.exposeInMainWorld("edgeeverDesktop", Object.freeze({
   completeStagedResource: (id) => ipcRenderer.invoke("desktop:stage-resource-complete", id),
   abortStagedResource: (id) => ipcRenderer.invoke("desktop:stage-resource-abort", id),
   listStagedResources: () => ipcRenderer.invoke("desktop:list-staged-resources"),
+  listStagedResourceAliases: (memoId) => ipcRenderer.invoke("desktop:list-staged-resource-aliases", memoId),
+  recordStagedResourceAlias: (id, uploadedUrl) => ipcRenderer.invoke("desktop:record-staged-resource-alias", id, uploadedUrl),
   remapStagedResourceMemoIds: (mappings) => ipcRenderer.invoke("desktop:remap-staged-resource-memo-ids", mappings),
   readStagedResource: (id) => ipcRenderer.invoke("desktop:read-staged-resource", id),
   readStagedResourcePart: (id, start, length) => ipcRenderer.invoke("desktop:read-staged-resource-part", id, start, length),
@@ -52,6 +79,17 @@ contextBridge.exposeInMainWorld("edgeeverDesktop", Object.freeze({
     ipcRenderer.on("desktop:command", listener);
     return () => ipcRenderer.removeListener("desktop:command", listener);
   },
+  onHibernatePrepare: (callback) => {
+    const listener = async () => {
+      try {
+        await callback();
+      } finally {
+        ipcRenderer.send("desktop:hibernate-prepared");
+      }
+    };
+    ipcRenderer.on("desktop:hibernate-prepare", listener);
+    return () => ipcRenderer.removeListener("desktop:hibernate-prepare", listener);
+  },
   syncScheduledTasks: (tasks) => ipcRenderer.invoke("desktop:sync-scheduled-tasks", tasks),
   onScheduledTask: (callback) => {
     const listener = (_event, payload) => callback(payload);
@@ -61,7 +99,37 @@ contextBridge.exposeInMainWorld("edgeeverDesktop", Object.freeze({
   onImportMarkdown: (callback) => {
     const listener = (_event, payload) => callback(payload);
     ipcRenderer.on("desktop:import-markdown", listener);
-    ipcRenderer.send("desktop:renderer-ready");
+    if (!rendererReadySent) {
+      rendererReadySent = true;
+      ipcRenderer.send("desktop:renderer-ready");
+    }
     return () => ipcRenderer.removeListener("desktop:import-markdown", listener);
+  },
+  readWeChatImportMedia: (importId, mediaId) => ipcRenderer.invoke("desktop:read-wechat-import-media", importId, mediaId).then((file) => ({
+    filename: file.filename,
+    mimeType: file.mimeType,
+    bytes: normalizeIpcBytes(file.bytes),
+  })),
+  finishWeChatImport: (importId, success) => ipcRenderer.invoke("desktop:finish-wechat-import", importId, success),
+  retryWeChatImport: (importId) => ipcRenderer.invoke("desktop:retry-wechat-import", importId),
+  onImportWeChatChat: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on("desktop:import-wechat-chat", listener);
+    return () => ipcRenderer.removeListener("desktop:import-wechat-chat", listener);
+  },
+  onImportScreenshot: (callback) => {
+    if (screenshotImportListener) {
+      ipcRenderer.removeListener("desktop:import-screenshot", screenshotImportListener);
+    }
+    const listener = (_event, payload) => {
+      callback({ ...payload, bytes: normalizeIpcBytes(payload?.bytes) });
+    };
+    screenshotImportListener = listener;
+    ipcRenderer.removeAllListeners("desktop:import-screenshot");
+    ipcRenderer.on("desktop:import-screenshot", listener);
+    return () => {
+      ipcRenderer.removeListener("desktop:import-screenshot", listener);
+      if (screenshotImportListener === listener) screenshotImportListener = null;
+    };
   },
 }));

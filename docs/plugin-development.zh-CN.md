@@ -1,6 +1,6 @@
 # EdgeEver 插件开发（P0 预览版）
 
-EdgeEver P0 扩展 API 支持受信任的客户端插件和无代码主题包。用户可以从已验证插件市场、公开 GitHub 仓库或 Manifest 地址安装扩展；扩展安装在当前设备，并且只在 EdgeEver 打开期间运行。桌面端用户可以为已注册的插件命令设置定时计划，并在 EdgeEver 运行期间执行。当前预览版不包含 Webhook、服务端常驻后台运行时、不受约束的 TipTap 扩展和严格的 JavaScript 沙箱。
+EdgeEver P0 扩展 API 支持受信任的客户端插件和无代码主题包。用户可以从已验证插件市场、公开 GitHub 仓库或 Manifest 地址安装扩展。安装清单会随当前工作区在 Web 与桌面端之间同步，每个浏览器或桌面应用会自行下载并校验插件包；Android 和 iOS 应用不运行插件。扩展只在 EdgeEver 打开期间运行。桌面端用户可以为已注册的插件命令设置定时计划，并在 EdgeEver 运行期间执行。当前预览版不包含 Webhook、服务端常驻后台运行时、不受约束的 TipTap 扩展和严格的 JavaScript 沙箱。
 
 ## 安全模型
 
@@ -23,6 +23,12 @@ EdgeEver P0 扩展 API 支持受信任的客户端插件和无代码主题包。
   "apiVersion": "2",
   "settingsUi": "host",
   "description": "Adds a command for recent notes.",
+  "locales": {
+    "zh-CN": {
+      "name": "最近笔记",
+      "description": "添加一个查看最近笔记的命令。"
+    }
+  },
   "entry": "./main.js",
   "platforms": ["web", "desktop"],
   "permissions": ["notes:read", "editor:read", "ui:commands", "ui:notices", "ui:panels"]
@@ -30,6 +36,8 @@ EdgeEver P0 扩展 API 支持受信任的客户端插件和无代码主题包。
 ```
 
 Manifest 和 JavaScript 模块必须返回允许 EdgeEver 来源访问的 CORS 响应头。相对 `entry` 地址基于 Manifest 地址解析。
+
+顶层必填的 `name` 与可选的 `description` 保持为回退文案。插件与主题可以增加以 BCP 47 语言标签为键的 `locales` 对象，例如 `zh-CN`、`en-US` 或 `ja`；每种语言可覆盖 `name`、`description` 或两者。EdgeEver 会先匹配当前界面语言，再匹配相同基础语言，最后回退到顶层字段。这里本地化的是插件市场与插件管理页的元数据；运行时命令、面板、通知及宿主渲染的设置项标签仍由插件自行负责本地化。
 
 ## 通过 GitHub 分发
 
@@ -73,6 +81,12 @@ Registry 格式：
     "id": "com.example.recent-notes",
     "name": "Recent Notes",
     "description": "Shows recently updated notes.",
+    "locales": {
+      "zh-CN": {
+        "name": "最近笔记",
+        "description": "显示最近更新的笔记。"
+      }
+    },
     "author": "EdgeEver",
     "publisher": "edgeever",
     "category": "Productivity",
@@ -562,13 +576,13 @@ mount(container, { shell, requestClose }) {
 
 ## 当前限制
 
-- 插件只安装在当前设备，不参与同步。
+- 安装清单会随当前工作区在 Web 与桌面端之间同步；每个客户端会重新下载并校验插件包。Android 和 iOS 原生应用不运行插件。
+- 插件设置、普通插件存储和 Secret 仍只保存在当前设备，不会同步。
 - 插件只在应用打开期间运行。
 - 桌面插件可以持久化定时执行自己的已注册命令，用户则可以在插件页面管理这些计划并分页查看执行记录。计划通过工作区同步、绑定一台桌面设备，并且只在该设备运行 EdgeEver 时执行；错过的计划可以选择跳过，或在恢复后合并补跑一次。这不是服务端常驻后台运行时。
 - 暂无 Webhook 接收端、服务端后台运行环境、市场投稿后台和自动审核流水线。
 - 能力声明只是可选的描述性元数据，不是 API 授权或安全沙箱。
 - 自定义面板可以从桌面端统一插件菜单或插件管理页打开，尚未支持固定到主导航或编辑器侧栏。
-- Secret Storage 仅保存在当前设备，不会同步到其他设备。
 
 ## 通用 AI 与公开网络能力（尚未发布）
 

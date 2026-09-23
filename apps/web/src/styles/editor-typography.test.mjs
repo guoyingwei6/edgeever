@@ -23,6 +23,17 @@ describe("editor typography contract", () => {
     expect(MEMO_CONTENT_STYLE.body.paragraphSpacing).toBe(6);
   });
 
+  test("configures punctuation squeezing and overflow wrapping for body text", () => {
+    const globals = readStyle("./globals.css");
+    const editorRules = declarationsForSelector(globals, ".ProseMirror");
+    const markdownRules = declarationsForSelector(globals, ".markdown-content");
+
+    expect(editorRules).toMatch(/overflow-wrap\s*:\s*break-word/);
+    expect(editorRules).toMatch(/font-feature-settings\s*:\s*["']chws["']\s*1/);
+    expect(markdownRules).toMatch(/overflow-wrap\s*:\s*break-word/);
+    expect(markdownRules).toMatch(/font-feature-settings\s*:\s*["']chws["']\s*1/);
+  });
+
   test("keeps compact rhythm unless a paper editor theme is selected", () => {
     const editorPane = readStyle("../components/EditorPane.tsx");
     const publishLayout = readStyle("./publish-layout.css");
@@ -53,7 +64,9 @@ describe("editor typography contract", () => {
     );
 
     expect(placeholderRules).toMatch(/font-size\s*:\s*inherit/);
+    expect(placeholderRules).toMatch(/font-weight\s*:\s*inherit/);
     expect(placeholderRules).toMatch(/line-height\s*:\s*inherit/);
+    expect(placeholderRules).toMatch(/color\s*:\s*#a8b5c4/);
   });
 
   test("keeps bold and italic text visible across platform font fallbacks", () => {
@@ -103,6 +116,29 @@ describe("editor typography contract", () => {
       expect(editorRules).not.toMatch(/(?:font-size|line-height)\s*:/);
       expect(paragraphRules).not.toMatch(/(?:line-height|margin|padding)(?:-[a-z]+)?\s*:/);
       expect(listRules).not.toMatch(/(?:line-height|margin)(?:-[a-z]+)?\s*:/);
+    }
+  });
+
+  test("does not let preset themes override table geometry", () => {
+    const geometryPattern =
+      /(?<![\w-])(?:padding|min-width|max-width|min-height|max-height|line-height|table-layout|width|height)(?:-[a-z]+)?\s*:/;
+
+    for (const filename of ["base.css", ...PRESET_THEME_FILES]) {
+      const source = readStyle(`./editor-themes/${filename}`);
+      const tableRules = [
+        declarationsForSelector(source, ".ProseMirror table"),
+        declarationsForSelector(source, ".ProseMirror .tableWrapper"),
+        declarationsForSelector(source, ".ProseMirror th"),
+        declarationsForSelector(source, ".ProseMirror td"),
+        declarationsForSelector(source, ".ProseMirror th p"),
+        declarationsForSelector(source, ".ProseMirror td p"),
+        declarationsForSelector(source, ".ProseMirror col"),
+        declarationsForSelector(source, ".ProseMirror tr"),
+      ].join("\n");
+
+      expect(tableRules).not.toMatch(geometryPattern);
+      expect(tableRules).not.toMatch(/--mobile-table-column-width\s*:/);
+      expect(tableRules).not.toMatch(/\bborder\s*:/);
     }
   });
 

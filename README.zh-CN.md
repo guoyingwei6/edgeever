@@ -1,13 +1,28 @@
-<h1><img src="assets/brand/edgeever-icon.svg" alt="EdgeEver Logo" width="40" align="absmiddle" /> EdgeEver</h1>
+<div align="center">
+  <h1>
+    <img src="assets/brand/edgeever-icon.svg" alt="EdgeEver Logo" width="40" align="absmiddle" /> EdgeEver
+  </h1>
+  <p>
+    <b>开源、原生支持 AI、可自由部署的自托管知识库与「印象笔记」替代方案</b>
+  </p>
+  <p>
+    <a href="https://github.com/tianma-if/edgeever/stargazers"><img src="https://img.shields.io/github/stars/tianma-if/edgeever?style=social" alt="GitHub Stars" /></a>
+    <a href="https://github.com/tianma-if/edgeever/network/members"><img src="https://img.shields.io/github/forks/tianma-if/edgeever?style=social" alt="GitHub Forks" /></a>
+    <a href="https://github.com/tianma-if/edgeever/pkgs/container/edgeever"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fghcr-badge.elias.eu.org%2Fapi%2Ftianma-if%2Fedgeever%2Fedgeever&query=downloadCount&style=social&logo=docker&label=Docker%20Pulls" alt="Docker Pulls" /></a>
+    <a href="https://www.producthunt.com/products/edgeever?utm_source=other&utm_medium=social"><img src="https://img.shields.io/badge/Product%20Hunt-ea532a?style=social&logo=product-hunt" alt="Product Hunt" /></a>
+    <a href="https://afdian.com/a/tianma-if"><img src="https://img.shields.io/badge/爱发电-946ce6?style=social&logo=github-sponsors" alt="爱发电赞助" /></a>
+  </p>
+  <p>
+    <b>简体中文</b> | <a href="README.zh-TW.md">繁體中文</a> | <a href="README.md">English</a> | <a href="README.ja.md">日本語</a>
+  </p>
+  <p>
+    <a href="#wechat-group">💬 微信交流群</a> &nbsp;|&nbsp;
+    <a href="https://demo.edgeever.org">🌐 在线演示</a> &nbsp;|&nbsp;
+    <a href="#客户端下载">📱 客户端下载</a>
+  </p>
+</div>
 
-[![GitHub Stars](https://img.shields.io/github/stars/tianma-if/edgeever?style=social)](https://github.com/tianma-if/edgeever/stargazers)
-[![GitHub Forks](https://img.shields.io/github/forks/tianma-if/edgeever?style=social)](https://github.com/tianma-if/edgeever/network/members)
-[![Product Hunt](https://img.shields.io/badge/Product%20Hunt-ea532a?style=social&logo=product-hunt)](https://www.producthunt.com/products/edgeever?utm_source=other&utm_medium=social)
-[![爱发电赞助](https://img.shields.io/badge/爱发电-赞助支持-946ce6?style=social&logo=github-sponsors)](https://afdian.com/a/tianma-if)
 
-简体中文 | [English](README.md)
-
-> **EdgeEver：开源、原生支持 AI、可自由部署的自托管知识库与「印象笔记」替代方案。**
 
 EdgeEver 是一款现代化的开源笔记与个人知识库工作区。它为你找回经典印象笔记的三栏高效体验，同时具备完全开放的数据架构与原生 AI Agent 联动能力，让个人知识沉淀更轻量、更自由。
 
@@ -21,10 +36,11 @@ EdgeEver 是一款现代化的开源笔记与个人知识库工作区。它为�
 很多长期使用**印象笔记**的用户，核心需求只是一个**可靠、开放、响应迅速**的个人知识库。然而，当下的主流方案都各有痛点：
 
 * **印象笔记**：功能日益臃肿，商业广告与繁杂附加功能充斥，性能与内存占用居高不下；且数据相对封闭难以导出，免费版限制重重，支持 AI/MCP 的套餐订阅成本高昂。
-* **Obsidian**：Markdown 开放，核心闭源；官方同步收费，第三方同步繁琐；图片与附件与文本混存，仓库体积极易膨胀导致移动端同步缓慢，且删笔记后残留附件难清理；对于“随时随地随手记”的轻量场景来说偏重。
-* **Memos 等轻量笔记**：虽然简单好用，但流式卡片布局与习惯了经典“三栏工作流”的用户有着天然的交互习惯差异。
+* **Obsidian**：Markdown 开放，核心闭源；官方同步收费，第三方同步繁琐；纯本地文件依赖遍历扫描，当笔记积累到数千上万条或加载复杂插件后，冷启动与全库检索明显卡顿迟缓；图片与附件与文本混存，仓库体积极易膨胀导致移动端同步缓慢，且删笔记后残留附件难清理；对于“随时随地随手记”的轻量场景来说偏重。
+* **Memos / Flomo 等轻量笔记**：虽然简单好用，但流式卡片布局与习惯了经典“三栏工作流”的用户有着天然的交互习惯差异。
+* **思源笔记等块级知识库**：功能深厚且支持开源自托管，但全面的“块级（Block）”架构使得日常随手记录与连续排版书写的心智负担偏重；且缺少零服务器成本的 Serverless 部署形态，多端同步主要依赖官方付费订阅，或需额外付费解锁 S3/WebDAV 同步特性并自备存储。
 
-**EdgeEver 恰好填补了这一空白**：整栈开源，云同步与自托管都可自行部署；同时保留经典三栏布局与流畅排版，原生支持接入 AI Agent，部署维护零门槛、零费用。
+**EdgeEver 恰好填补了这一空白**：整栈开源，云同步与自托管都可自行部署；同时保留经典三栏布局与流畅排版，万条笔记常驻依然轻盈丝滑，原生支持接入 AI Agent，部署维护零门槛、零费用。
 
 > 💡 **最佳实践推荐：**
 > 全端随时捕捉灵感与素材，在经典三栏中深度整理沉淀；借助原生 MCP 协议，不仅能让 AI Agent 随时检索与协同思考，还可轻松打通 Notion、飞书等外部常用工具链；对外一键排版发布，全量数据 0 成本自托管，打造开放互联、真正属于你的智能第二大脑。
@@ -57,14 +73,15 @@ EdgeEver 是一款现代化的开源笔记与个人知识库工作区。它为�
 - **丰富的插件 API**：可通过[插件开发文档](docs/plugin-development.zh-CN.md)扩展 EdgeEver。
 - **多端无缝同步，无设备限制**：自托管数据无商业限制，摆脱免费账号仅限 2 台设备的束缚，在 PC、平板与手机上随心同步。
 - **经典三栏布局与专注模式**：笔记本树、笔记列表与编辑区一目了然；桌面端一键开启专注模式，让思绪尽情铺满屏幕。
+- **桌面端轻快省内存**：切笔记不会堆积旧图和旧文档，长时间挂在后台也保持流畅。
 - **无限层级笔记本**：轻松构建清晰的多级目录结构。
 - **微信公众号一键排版与复制**：专为中文创作者设计，支持将笔记一键转换为带行内样式的公众号美化格式，直接复制粘贴至微信公众号后台，告别复杂的第三方排版工具。
 - **优雅的双视图编辑**：桌面端支持在富文本与 Markdown 源码视图之间自由切换。
 - **单篇笔记便捷导出**：可将当前笔记直接导出为 Markdown、HTML 或 PDF，方便独立保存、分享与发布。
 - **Mermaid 架构图与流程图渲染**：原生支持 Mermaid 代码块渲染，视图切换时完整保留可编辑源码，让绘制逻辑图表更直观。
-- **可视化图表笔记**：Web 与桌面端支持创建、编辑思维导图、流程图和架构图，提供语义组件、系统边界、连线说明、自动布局、历史版本及 PNG/SVG 导出；Android 与 iOS App 保留同一份图表数据，并提供语义化只读视图。详见[可视化图表笔记设计说明](docs/visual-diagram-notes.zh-CN.md)。
+- **可视化图表笔记**：告别外部绘图软件，在笔记内即可直观绘制思维导图、流程图与架构图；基于结构化 IR，内置助手与外部 AI Agent 可一句话智能生成与修改图表，支持自动布局、全端同步及矢量导出。详见[可视化图表笔记设计说明](docs/visual-diagram-notes.zh-CN.md)。
 - **笔记历史版本回溯**：自动记录修改历史，随时查阅与还原过往版本。
-- **公开笔记分享**：支持公开分享笔记，并可随时取消分享。
+- **公开笔记分享**：支持公开分享笔记，并可随时取消分享；需要时可为分享链接开启自动生成的访问密码。
 - **移动 App 微信公众号文章剪藏**：在手机上将微信公众号文章分享至 EdgeEver，即可提取正文并保存为可继续编辑的笔记。
 - **智能前端图片压缩**：图片上传前在浏览器端静默完成压缩，常见截图与大图精简 50%-90% 体积，加载更迅速、存储更省心。
 - **通用文件附件支持**：支持轻松上传并插入 PDF、Office 文档、压缩包及音视频等各种附件；通过分片上传与流式处理，安全支持最大 1 GiB 附件。
@@ -153,7 +170,9 @@ EdgeEver 官方容器镜像托管于 GitHub Container Registry（GHCR）。部�
 - Bug、功能建议和部署问题请优先提交 [GitHub Issues](https://github.com/tianma-if/edgeever/issues)，方便后续用户检索和复用解决方案。
 - 贡献代码前请阅读[贡献代码须知](CONTRIBUTING.zh-CN.md)。如果您的 Fork 同时用于部署 EdgeEver，请将 `main` 分支仅用于部署；从官方 `upstream/main` 新建独立分支，在该分支中同步上游、开发并提交 Pull Request，不要在部署用的 `main` 上开发或执行 Sync fork。
 
-### 微信交流群
+<hr>
+
+<h3 id="wechat-group">微信交流群</h3>
 
 欢迎加入 EdgeEver AI 交流群，这里聚集了大量 Vibe Coding 与 AI 玩家。一起交流 EdgeEver 体验、AI Agent 实战落地、高性价比/免费 AI 资源及自动化工作流。
 
@@ -165,7 +184,7 @@ EdgeEver 官方容器镜像托管于 GitHub Container Registry（GHCR）。部�
 
 ## 插件与主题
 
-EdgeEver 的 Web 与桌面端支持安装在当前设备的插件和无代码主题，可从插件市场、GitHub 或 Manifest 地址安装。官方插件市场仅收录自由及开源插件，该要求不限制用户直接通过 GitHub 或 Manifest 地址安装其他插件。开发者可使用 `@edgeever/plugin-api`，详情参阅[插件开发文档](docs/plugin-development.zh-CN.md)和[官方插件市场上架政策](docs/plugin-marketplace-policy.zh-CN.md)。
+Web 与桌面端支持功能插件与个性化主题，可从官方市场、GitHub 或 Manifest 地址一键安装，并随工作区跨端同步。开发者可使用 `@edgeever/plugin-api` 扩展能力，详见[插件开发文档](docs/plugin-development.zh-CN.md)与[官方插件市场上架政策](docs/plugin-marketplace-policy.zh-CN.md)。
 
 ## 技术栈
 
@@ -176,7 +195,7 @@ EdgeEver 的 Web 与桌面端支持安装在当前设备的插件和无代码主
 - iOS App：`apps/ios` 中的原生 SwiftUI（iOS 17+），内置 TipTap EditorBundle、GRDB 本地镜像/outbox，界面与 Android 壳层对齐。
 - 原生桌面端：Electron + Rust sidecar，兼顾跨平台一致体验与高性能本地数据服务；基于 SQLite 支持离线编辑、联网后增量同步与本地备份。
 - 网页裁剪：Manifest V3、Mozilla Readability、Turndown，支持 Chrome、Microsoft Edge 与 Firefox。
-- 后端：一套基于 Hono/Zod 的业务应用，提供 REST API、OpenAPI 与 Remote MCP；Cloudflare 使用 Workers/D1/R2，Docker 使用 Bun/SQLite/本地文件或 S3。
+- 后端：一套基于 Hono/Zod 的业务应用，提供 REST API 与 Remote MCP；Cloudflare 使用 Workers/D1/R2，Docker 使用 Bun/SQLite/本地文件或 S3。
 - 官网：Astro 静态站点，位于 `apps/site`，可独立构建并部署到 Cloudflare Pages。
 
 ## 快速开始
@@ -193,7 +212,7 @@ bun run dev
 ```text
 apps/web          Vite + React 前端、PWA、离线草稿与同步队列
 apps/extension    Chrome/Edge/Firefox Manifest V3 网页裁剪插件
-apps/api          Cloudflare Worker + Hono API、OpenAPI、MCP endpoint
+apps/api          Cloudflare Worker + Hono API、MCP endpoint
 apps/mobile       Expo + React Native Android App
 apps/ios          原生 SwiftUI iOS App（TipTap EditorBundle、GRDB）
 apps/desktop      Electron 桌面端壳层、preload bridge 与原生打包配置
@@ -204,7 +223,7 @@ crates/desktop-sidecar
                    Rust sidecar，负责本地 SQLite、离线数据、备份与资源服务
 scripts           Wrangler 封装、密码 hash、CLI、MCP stdio bridge、Evernote ENEX 导入
 migrations        D1/SQLite 共用、只增不改的数据库 migration
-docs              OpenAPI schema、架构、迁移与部署文档
+docs              架构、迁移与部署文档
 .github/workflows Web、移动端、iOS、桌面端打包、部署与 Release 的 CI
 wrangler.toml     Cloudflare Workers、Assets、D1、R2 配置
 ```
@@ -220,16 +239,6 @@ content_text      搜索、摘要和索引使用
 ```
 
 请打开 **我的** -> **导入与导出**，导出或导入 EdgeEver ZIP。压缩包中的 `notes/` 目录可直接作为 Markdown 阅读和迁移，结构化数据则用于在 EdgeEver 实例之间完整恢复；导入时目标实例中的无关数据会保留，相同 EdgeEver ID 的内容会被覆盖。
-
-## API 文档
-
-OpenAPI schema：
-
-```text
-https://你的域名/api/openapi.json
-```
-
-仓库内文件：[docs/openapi.json](docs/openapi.json)。
 
 ## MCP
 
@@ -268,9 +277,7 @@ Web、PWA 与桌面端会在停止编辑 30 秒后上传笔记，并在页面可
 
 - EdgeEver 的笔记产品设计也参考了 [Evernote（印象笔记）](https://evernote.com/) 等成熟笔记工具的公开产品体验。相关功能由 EdgeEver 独立设计与实现。
 - 思维导图与可视化图表笔记的产品设计参考了 [XMind](https://xmind.com/) 和 [ProcessOn](https://www.processon.com/) 等图表工具的公开产品体验。相关功能由 EdgeEver 独立设计与实现。
-- “极简绿”主题排版架构借鉴于 [obsidian-minimal](https://github.com/kepano/obsidian-minimal)。
-- “描边绿”主题排版架构借鉴于 [Outline](https://github.com/outline/outline)。
-- 暖笺、教程、蓝图、刊物、立场、存根、内参、纲要、留白、草木等纸稿编辑器主题，参考了 [墨格](https://moyufang.cn/editor) 公开排版方案的标题层级、章节数字与引言结构。实现、素材与文案均由 EdgeEver 独立完成。
+- 编辑器主题的排版架构、标题层级与章节结构参考了 [obsidian-minimal](https://github.com/kepano/obsidian-minimal)、[Outline](https://github.com/outline/outline) 和 [墨格](https://moyufang.cn/editor) 的公开方案。名称、素材与实现均由 EdgeEver 独立完成。
 
 ## 商标与品牌使用
 

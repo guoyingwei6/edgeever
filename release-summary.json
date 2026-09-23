@@ -1,19 +1,20 @@
 {
-  "version": "1.69.0",
+  "version": "1.84.0",
   "changes": {
     "en-US": [
-      "Add paper editor themes such as Letter, Guide, Blueprint, and Journal. Copy to WeChat uses the same style, and a live phone preview follows editor scroll.",
-      "Collapse the notebook sidebar into an icon rail to give the editor more room.",
-      "Play common video attachments inline, and delete in-note video and file attachment cards.",
-      "Enter Android note editing without remounting the viewer, so the editor no longer loses its place.",
-      "List EdgeEver Tasks as an official marketplace plugin, and fix GitHub plugin release tags and plugin panel tab switching."
+      "Structured tables can attach files. Files stay in object storage, and the table keeps only the reference. A public form link adds one row per response and does not show existing records. Turning on accept-responses creates the form and shows the link; the title, fields, and password save on their own. While the form is collecting, the toolbar button turns green. An open table can refresh to load new submissions, and refresh stays off while the grid has unsaved edits. Self-hosted instances need this version before attachments and the public form work.",
+      "On macOS, a newly installed WeChat share extension stays off until the app enables it for the current user at launch and opens it from the system share sheet. EdgeEver then appears in WeChat's share menu.",
+      "Note sharing stays available while reading is locked, including the phone reading view. Phones get a header button that opens the existing share link. Copying a note as an image writes the image through the desktop main process. If that copy fails, the app tells you to download it instead of doing nothing."
     ],
     "zh-CN": [
-      "新增暖笺、教程、蓝图、刊物等纸稿编辑器主题，复制到公众号时沿用同一风格，并提供跟随滚动的实时手机预览。",
-      "笔记本侧栏可收成图标轨道，给编辑区腾出更多空间。",
-      "常见视频附件可在笔记内直接播放，也可直接删除笔记中的视频和文件附件卡片。",
-      "Android 进入笔记编辑时不再重新挂载阅读视图，避免编辑状态丢失。",
-      "插件市场列出官方 EdgeEver Tasks，并修复 GitHub 插件发行标签与面板标签页切换。"
+      "多维表格可以给记录添加附件。附件存在对象存储里，表格只保存引用。公开填写链接每提交一次就新增一行，不会展示已有记录。打开接受回复就会创建表单并给出链接，标题、字段和密码会自动保存。正在收集时，工具栏按钮会变绿。打开的表格可以刷新以载入新提交；表格里还有未保存的修改时，刷新保持不可用。自建实例需要升级到这一版后，附件和公开表单才会生效。",
+      "macOS 上，新安装的微信分享扩展默认是关闭的。这一版会在启动时为当前用户启用它，并从系统分享入口打开，微信的分享菜单里才会出现 EdgeEver。",
+      "阅读锁定时，以及手机的阅读视图里，仍然可以打开分享。手机顶栏有按钮打开原来的分享链接。把笔记复制成图片时，桌面端会通过主进程写入剪贴板；复制失败会提示改为下载，而不是没有任何反应。"
+    ],
+    "ja": [
+      "構造化テーブルにファイルを添付できます。ファイルはオブジェクトストレージに保存され、テーブルには参照だけが残ります。公開フォームのリンクから回答すると1行が追加され、既存の記録は表示されません。回答の受付をオンにするとフォームが作られてリンクが表示され、タイトル、項目、パスワードは自動で保存されます。受付中はツールバーのボタンが緑になります。開いているテーブルは更新して新しい回答を読み込め、未保存の編集がある間は更新できません。セルフホストのインスタンスは、このバージョンに上げてから添付ファイルと公開フォームが使えます。",
+      "macOS では、新しくインストールした WeChat 共有拡張機能は初期状態でオフです。この版は起動時に現在のユーザー向けに有効化し、システムの共有シートから開くので、WeChat の共有メニューに EdgeEver が表示されます。",
+      "閲覧ロック中でも、スマホの閲覧画面からでもノートを共有できます。スマホではヘッダーのボタンから既存の共有リンクを開きます。ノートを画像としてコピーすると、デスクトップはメインプロセス経由でクリップボードに書き込みます。コピーに失敗したときは、無反応ではなくダウンロードするよう案内します。"
     ]
   }
 }

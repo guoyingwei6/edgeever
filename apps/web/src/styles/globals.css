@@ -88,7 +88,12 @@ html.dark[data-edgeever-environment="demo"] body::after {
 }
 
 .ProseMirror .tiptap-mathematics-render--editable {
-  cursor: text;
+  cursor: pointer;
+  border-radius: 0.2rem;
+}
+
+.ProseMirror .tiptap-mathematics-render--editable:hover {
+  background: rgb(22 160 110 / 0.08);
 }
 
 .ProseMirror .inline-math-error,
@@ -438,6 +443,20 @@ html[data-edgeever-extension-theme] kbd {
   background: var(--workspace-sidebar);
 }
 
+.edgeever-create-memo-split {
+  container-type: inline-size;
+}
+
+.edgeever-create-memo-split__more-label {
+  display: inline;
+}
+
+@container (max-width: 11.749rem) {
+  .edgeever-create-memo-split__more-label {
+    display: none;
+  }
+}
+
 .edgeever-workspace-memo-list {
   border-color: var(--workspace-divider);
   background: var(--workspace-memo-list);
@@ -601,6 +620,36 @@ html[data-edgeever-extension-theme] .edgeever-memo-divider {
   pointer-events: none !important;
 }
 
+/* Flowchart node modern card elevation */
+.edgeever-diagram-canvas[data-diagram-kind="flowchart"] .x6-node rect[selector="body"],
+.edgeever-diagram-canvas[data-diagram-kind="flowchart"] .x6-node polygon[selector="body"],
+.edgeever-x6-diagram[data-diagram-kind="flowchart"] .x6-node rect[selector="body"],
+.edgeever-x6-diagram[data-diagram-kind="flowchart"] .x6-node polygon[selector="body"] {
+  filter: drop-shadow(0 1px 2px rgb(15 23 42 / 0.06)) drop-shadow(0 2px 5px rgb(15 23 42 / 0.04));
+  transition: filter 160ms ease, stroke 160ms ease;
+}
+
+:root.dark .edgeever-diagram-canvas[data-diagram-kind="flowchart"] .x6-node rect[selector="body"],
+:root.dark .edgeever-diagram-canvas[data-diagram-kind="flowchart"] .x6-node polygon[selector="body"],
+:root.dark .edgeever-x6-diagram[data-diagram-kind="flowchart"] .x6-node rect[selector="body"],
+:root.dark .edgeever-x6-diagram[data-diagram-kind="flowchart"] .x6-node polygon[selector="body"] {
+  filter: drop-shadow(0 1px 3px rgb(0 0 0 / 0.45)) drop-shadow(0 2px 6px rgb(0 0 0 / 0.3));
+}
+
+.edgeever-diagram-canvas[data-diagram-kind="flowchart"] .x6-node:hover rect[selector="body"],
+.edgeever-diagram-canvas[data-diagram-kind="flowchart"] .x6-node:hover polygon[selector="body"],
+.edgeever-x6-diagram[data-diagram-kind="flowchart"] .x6-node:hover rect[selector="body"],
+.edgeever-x6-diagram[data-diagram-kind="flowchart"] .x6-node:hover polygon[selector="body"] {
+  filter: drop-shadow(0 2px 5px rgb(15 23 42 / 0.1)) drop-shadow(0 4px 10px rgb(15 23 42 / 0.06));
+}
+
+:root.dark .edgeever-diagram-canvas[data-diagram-kind="flowchart"] .x6-node:hover rect[selector="body"],
+:root.dark .edgeever-diagram-canvas[data-diagram-kind="flowchart"] .x6-node:hover polygon[selector="body"],
+:root.dark .edgeever-x6-diagram[data-diagram-kind="flowchart"] .x6-node:hover rect[selector="body"],
+:root.dark .edgeever-x6-diagram[data-diagram-kind="flowchart"] .x6-node:hover polygon[selector="body"] {
+  filter: drop-shadow(0 2px 6px rgb(0 0 0 / 0.6)) drop-shadow(0 4px 12px rgb(0 0 0 / 0.4));
+}
+
 .edgeever-diagram-canvas .x6-port-body {
   opacity: 0;
   transition: opacity 120ms ease, filter 120ms ease;
@@ -653,7 +702,10 @@ html[data-edgeever-extension-theme] .edgeever-memo-divider {
 :root.dark .ProseMirror,
 :root.dark .ProseMirror h1,
 :root.dark .ProseMirror h2,
-:root.dark .ProseMirror h3 {
+:root.dark .ProseMirror h3,
+:root.dark .ProseMirror h4,
+:root.dark .ProseMirror h5,
+:root.dark .ProseMirror h6 {
   color: hsl(var(--foreground));
 }
 
@@ -675,6 +727,137 @@ textarea {
   padding: 8px 0 56px;
   tab-size: 4;
   white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: break-word;
+  font-feature-settings: "chws" 1;
+}
+
+.edgeever-block-drag-handle {
+  z-index: 20;
+  display: none;
+  width: 1.25rem;
+  height: 1.5rem;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+  border-radius: 0.25rem;
+  color: #94a3b8;
+}
+
+.edgeever-block-drag-handle:hover {
+  background: #f1f5f9;
+  color: #16a06e;
+}
+
+.edgeever-block-drag-handle:active,
+.edgeever-block-drag-handle[data-dragging="true"] {
+  cursor: grabbing;
+}
+
+@media (min-width: 1024px) {
+  .edgeever-block-drag-handle {
+    display: flex;
+  }
+}
+
+.ProseMirror-selectednoderange {
+  border-radius: 0.25rem;
+  background: rgb(22 160 110 / 0.06);
+  outline: 2px solid rgb(22 160 110 / 0.28);
+}
+
+:root.dark .edgeever-block-drag-handle {
+  color: #64748b;
+}
+
+:root.dark .edgeever-block-drag-handle:hover {
+  background: #1e293b;
+  color: #34d399;
+}
+
+:root.dark .ProseMirror-selectednoderange {
+  background: rgb(52 211 153 / 0.1);
+  outline-color: rgb(52 211 153 / 0.35);
+}
+
+.ProseMirror [data-type="details"] {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.1em;
+  margin: 0.15em 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.ProseMirror [data-type="details"] > button {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 1.6em;
+  height: 1.6em;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #16a06e;
+  font: inherit;
+  line-height: 0;
+  cursor: pointer;
+}
+
+.ProseMirror [data-type="details"] > button:hover {
+  background: color-mix(in srgb, currentColor 8%, transparent);
+}
+
+.ProseMirror [data-type="details"] > button:focus-visible {
+  outline: 2px solid color-mix(in srgb, #16a06e 55%, transparent);
+  outline-offset: 1px;
+}
+
+.ProseMirror [data-type="details"] > button::before {
+  content: "";
+  width: 0.32em;
+  height: 0.32em;
+  margin: 0;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+}
+
+.ProseMirror [data-type="details"].is-open > button::before {
+  transform: rotate(45deg);
+}
+
+.ProseMirror [data-type="details"] > div {
+  flex: 1;
+  min-width: 0;
+}
+
+.ProseMirror summary {
+  display: block;
+  margin: 0;
+  padding: 0;
+  font-size: inherit;
+  font-weight: 500;
+  line-height: inherit;
+  list-style: none;
+  cursor: text;
+}
+
+.ProseMirror summary::-webkit-details-marker {
+  display: none;
+}
+
+.ProseMirror [data-type="details"]:not(.is-open) [data-type="detailsContent"] {
+  display: none !important;
+}
+
+.ProseMirror [data-type="details"].is-open [data-type="detailsContent"] {
+  margin-top: 0.15em;
 }
 
 .edgeever-public-share .ProseMirror {
@@ -931,6 +1114,31 @@ textarea {
   letter-spacing: -0.01em;
   margin: 1.15rem 0 0.5rem;
   color: #1e293b;
+}
+
+.ProseMirror h4 {
+  font-size: 1.0625rem;
+  font-weight: 600;
+  line-height: 1.4;
+  letter-spacing: -0.006em;
+  margin: 1.05rem 0 0.45rem;
+  color: #1e293b;
+}
+
+.ProseMirror h5 {
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.42;
+  margin: 0.95rem 0 0.4rem;
+  color: #334155;
+}
+
+.ProseMirror h6 {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  line-height: 1.45;
+  margin: 0.85rem 0 0.35rem;
+  color: #334155;
 }
 
 .ProseMirror p {
@@ -1810,13 +2018,18 @@ textarea {
 }
 
 .ProseMirror.edgeever-note-rich-editor p.is-empty::before {
-  color: #94a3b8;
+  color: #a8b5c4;
   content: attr(data-placeholder);
   float: left;
   font-size: inherit;
+  font-weight: inherit;
   height: 0;
   line-height: inherit;
   pointer-events: none;
+}
+
+:root.dark .ProseMirror.edgeever-note-rich-editor p.is-empty::before {
+  color: #64748b;
 }
 
 /* Custom premium scrollbar style */
@@ -1845,6 +2058,51 @@ textarea {
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   color: #1e293b;
   line-height: 1.7;
+  word-break: break-word;
+  overflow-wrap: break-word;
+  font-feature-settings: "chws" 1;
+}
+.companion-markdown.markdown-content > :first-child {
+  margin-top: 0;
+}
+.companion-markdown.markdown-content > :last-child {
+  margin-bottom: 0;
+}
+.companion-markdown.markdown-content h1,
+.companion-markdown.markdown-content h2,
+.companion-markdown.markdown-content h3,
+.companion-markdown.markdown-content h4,
+.companion-markdown.markdown-content h5,
+.companion-markdown.markdown-content h6 {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  line-height: 1.4;
+  margin-top: 0.7rem;
+  margin-bottom: 0.2rem;
+  padding: 0;
+  border: none;
+}
+.companion-markdown.markdown-content h1:first-child,
+.companion-markdown.markdown-content h2:first-child,
+.companion-markdown.markdown-content h3:first-child,
+.companion-markdown.markdown-content h4:first-child,
+.companion-markdown.markdown-content h5:first-child,
+.companion-markdown.markdown-content h6:first-child {
+  margin-top: 0;
+}
+.companion-markdown.markdown-content p {
+  margin: 0.4rem 0;
+}
+.companion-markdown.markdown-content ul,
+.companion-markdown.markdown-content ol {
+  margin: 0.25rem 0 0.45rem;
+  padding-left: 1.15rem;
+}
+.companion-markdown.markdown-content li {
+  margin: 0.12rem 0;
+}
+.companion-markdown.markdown-content hr {
+  margin: 0.75rem 0;
 }
 .markdown-content h1 {
   font-size: 1.5rem;
@@ -2031,6 +2289,7 @@ textarea {
   white-space: normal;
   overflow-wrap: anywhere;
   word-break: break-word;
+  letter-spacing: normal;
   line-height: 1.45;
   transition: background-color 120ms ease;
 }
@@ -2092,8 +2351,12 @@ textarea {
 .ProseMirror th p,
 .ProseMirror td p,
 .markdown-content th p,
-.markdown-content td p {
+.markdown-content td p,
+.edgeever-editor[data-editor-theme]:not([data-editor-theme="default"]) .ProseMirror :is(th, td) p,
+.edgeever-editor[data-paper-theme]:not([data-editor-theme="default"]) .ProseMirror :is(th, td) p {
   margin: 0;
+  letter-spacing: inherit;
+  line-height: inherit;
 }
 
 .ProseMirror .selectedCell::after {

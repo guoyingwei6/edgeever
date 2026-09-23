@@ -10,12 +10,14 @@ import {
   EDITOR_PHONE_PREVIEW_STORAGE_KEY,
   EDITOR_PHONE_PREVIEW_FOLLOW_STORAGE_KEY,
   NOTEBOOK_SORT_STORAGE_KEY,
+  NOTEBOOK_TREE_COLLAPSED_IDS_STORAGE_KEY,
   SHORTCUT_SETTINGS_STORAGE_KEY,
   getSearchShortcutScope,
   getShortcutActionForEvent,
   getNotebookSortComparator,
   readEditorContentAlignmentPreference,
   readNotebookSortPreference,
+  readNotebookTreeCollapsedIdsPreference,
   readDesktopFocusModePreference,
   readDesktopReadingProtectionPreference,
   readNotebookSidebarCollapsedPreference,
@@ -26,6 +28,7 @@ import {
   readShortcutSettingsPreference,
   writeEditorContentAlignmentPreference,
   writeNotebookSortPreference,
+  writeNotebookTreeCollapsedIdsPreference,
   writeDesktopFocusModePreference,
   writeDesktopReadingProtectionPreference,
   writeNotebookSidebarCollapsedPreference,
@@ -35,6 +38,8 @@ import {
   writeEditorPhonePreviewFollowPreference,
   resolveSelectionMoveTargetNotebookId,
   getMemoIdsNeedingMove,
+  getActiveBlockValue,
+  parseHeadingBlockValue,
 } from "./app-helpers.ts";
 
 const originalWindow = globalThis.window;
@@ -353,6 +358,43 @@ describe("custom notebook sorting", () => {
   });
 });
 
+describe("notebook tree collapsed preference", () => {
+  test("round-trips the user's collapsed notebook branches", () => {
+    const values = installLocalStorage();
+
+    writeNotebookTreeCollapsedIdsPreference(["notebook-2", "notebook-1", "notebook-2"]);
+
+    expect(values.get(NOTEBOOK_TREE_COLLAPSED_IDS_STORAGE_KEY)).toBe('["notebook-2","notebook-1"]');
+    expect(readNotebookTreeCollapsedIdsPreference()).toEqual(new Set(["notebook-2", "notebook-1"]));
+  });
+
+  test("ignores malformed and invalid stored values", () => {
+    const values = installLocalStorage();
+
+    values.set(NOTEBOOK_TREE_COLLAPSED_IDS_STORAGE_KEY, "{");
+    expect(readNotebookTreeCollapsedIdsPreference()).toEqual(new Set());
+
+    values.set(NOTEBOOK_TREE_COLLAPSED_IDS_STORAGE_KEY, JSON.stringify(["notebook-1", "", null, 2]));
+    expect(readNotebookTreeCollapsedIdsPreference()).toEqual(new Set(["notebook-1"]));
+  });
+
+  test("falls back to expanded when local storage is unavailable", () => {
+    globalThis.window = {
+      localStorage: {
+        getItem: () => {
+          throw new Error("blocked");
+        },
+        setItem: () => {
+          throw new Error("blocked");
+        },
+      },
+    };
+
+    expect(readNotebookTreeCollapsedIdsPreference()).toEqual(new Set());
+    expect(() => writeNotebookTreeCollapsedIdsPreference(["notebook-1"])).not.toThrow();
+  });
+});
+
 describe("workspace shortcut preferences", () => {
   test("provides navigation, AI, save, reading protection, and editor mode defaults", () => {
     expect(DEFAULT_SHORTCUT_SETTINGS.focusGlobalSearch).toEqual({
@@ -510,5 +552,34 @@ describe("selection move target", () => {
     expect(getMemoIdsNeedingMove(memos, ["memo-1", "memo-2", "memo-3"], "archive")).toEqual(["memo-1", "memo-3"]);
     expect(getMemoIdsNeedingMove(memos, ["memo-2"], "archive")).toEqual([]);
     expect(getMemoIdsNeedingMove(memos, ["memo-1"], "")).toEqual([]);
+  });
+});
+
+describe("editor heading block value", () => {
+  test("parses heading-1 through heading-6 and rejects other values", () => {
+    expect(parseHeadingBlockValue("heading-1")).toBe(1);
+    expect(parseHeadingBlockValue("heading-6")).toBe(6);
+    expect(parseHeadingBlockValue("heading-7")).toBe(null);
+    expect(parseHeadingBlockValue("paragraph")).toBe(null);
+  });
+
+  test("reports the active heading level including 4 through 6", () => {
+    const editor = {
+      isDestroyed: false,
+      extensionManager: {},
+      isActive: (name, attrs) => name === "heading" && attrs.level === 5,
+    };
+
+    expect(getActiveBlockValue(editor)).toBe("heading-5");
+    expect(getActiveBlockValue({
+      isDestroyed: false,
+      extensionManager: {},
+      isActive: (name, attrs) => name === "heading" && attrs.level === 3,
+    })).toBe("heading-3");
+    expect(getActiveBlockValue({
+      isDestroyed: false,
+      extensionManager: {},
+      isActive: () => false,
+    })).toBe("paragraph");
   });
 });

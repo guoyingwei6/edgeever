@@ -13,6 +13,7 @@ import {
   buildAiAssistantLastActionPreference,
   readStoredAiAssistantLastActionPreference,
   resolveAiAssistantLastAction,
+  resolveAiAssistantOpenAction,
   writeStoredAiAssistantLastActionPreference,
   promptAllowsAppend,
   promptAllowsReplace,
@@ -50,6 +51,7 @@ export {
   promptNeedsTone,
   readStoredAiAssistantLastActionPreference,
   resolveAiAssistantLastAction,
+  resolveAiAssistantOpenAction,
   writeStoredAiAssistantLastActionPreference,
 };
 
@@ -157,3 +159,25 @@ export const buildAiAssistantRequest = ({
 };
 
 export type { AiPromptParameterKind, AiPromptResultMode };
+
+export type AiAssistantMode = "instruction" | "ask";
+const AI_ASSISTANT_MODE_KEY = "edgeever.aiAssistant.mode";
+
+export function readStoredAiAssistantMode(): AiAssistantMode {
+  try {
+    const value = localStorage.getItem(AI_ASSISTANT_MODE_KEY);
+    if (value === "ask" || value === "organize") return "ask";
+    if (value === "instruction") return "instruction";
+  } catch {
+    // Ignore unavailable storage.
+  }
+  return "instruction";
+}
+
+export function writeStoredAiAssistantMode(mode: AiAssistantMode) {
+  try {
+    localStorage.setItem(AI_ASSISTANT_MODE_KEY, mode);
+  } catch {
+    // Ignore unavailable storage.
+  }
+}

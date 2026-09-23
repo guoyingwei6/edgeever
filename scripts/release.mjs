@@ -50,6 +50,7 @@ export const RELEASE_VALIDATIONS = [
       "scripts/release.test.mjs",
       "scripts/validate-store-delivery.test.mjs",
       "scripts/store-delivery.test.mjs",
+      "scripts/xcode-cloud-control.test.mjs",
       "scripts/download-play-universal-apk.test.mjs",
       "scripts/desktop-icns.test.mjs",
       "scripts/verify-desktop-cross-version-startup.test.mjs",
@@ -66,9 +67,10 @@ const usage = `Usage:
     --label bug \\
     --change-en "English user-facing change" \\
     --change-zh "中文用户更新说明" \\
+    --change-locale "ja:日本語のユーザー向け説明" \\
     --change-commit "abcdef1"
 
-Repeat --change-en, --change-zh, and --change-commit for multiple paired release bullets.
+Repeat --change-en, --change-zh, --change-locale ja:, and --change-commit for multiple paired release bullets.
 Use comma-separated SHAs when one bullet covers multiple commits. Every other
 commit requires --ignore-commit "abcdef1:reason".
 
@@ -79,7 +81,7 @@ Options:
   --label <label>            Required Issue label; may be repeated
   --change-en <text>         Required English release bullet; may be repeated
   --change-zh <text>         Required Chinese release bullet; may be repeated
-  --change-locale <tag:text> Optional localized bullet; repeat once per change and locale
+  --change-locale <tag:text> Required Japanese bullet as ja: or ja-JP:; other locales optional
   --change-commit <sha,...>  Commits covered by the corresponding bilingual bullet
   --ignore-commit <sha:why>  Explicitly exclude a non-user-facing commit; may be repeated
   --install-desktop          Install and launch the final DMG after publication
@@ -187,6 +189,11 @@ export const parseReleaseArgs = (argv) => {
     if (changes.length !== options.changesEn.length) {
       throw new Error(`--change-locale ${locale} must provide one translation for every release change.`);
     }
+  }
+  if (!localizedChanges.ja && !localizedChanges["ja-JP"]) {
+    throw new Error(
+      "--change-locale ja is required because the App Store listing includes Japanese What's New.",
+    );
   }
   options.localizedChanges = localizedChanges;
   return options;
@@ -375,8 +382,6 @@ export const buildReleaseNotes = ({
   changesZh,
   issueNumber,
 }) => [
-  "## 🇨🇳 中文说明 / Chinese Changelog",
-  "",
   "## 主要更新",
   "",
   ...changesZh.map((change) => `- ${change}`),
@@ -532,7 +537,42 @@ const assertReleasePreconditions = ({ repository, previousTag }) => {
   }
 };
 
-const updateReleaseVersions = ({ nextVersion, desktopRebuild, mobileRebuild, changesEn, changesZh, localizedChanges }) => {
+export const updateIosMarketingVersion = (contents, nextVersion) => {
+  const updated = String(contents).replace(
+    /^MARKETING_VERSION\s*=\s*.+$/m,
+    `MARKETING_VERSION = ${nextVersion}`,
+  );
+  if (!new RegExp(`^MARKETING_VERSION\\s*=\\s*${nextVersion}$`, "m").test(updated)) {
+    throw new Error("Unable to update apps/ios/Config/Version.xcconfig MARKETING_VERSION.");
+  }
+  return updated;
+};
+
+export const updateIosProjectMarketingVersion = (contents, nextVersion) => {
+  const updated = String(contents).replace(
+    /MARKETING_VERSION = [^;]+;/g,
+    `MARKETING_VERSION = ${nextVersion};`,
+  );
+  const matches = updated.match(
+    new RegExp(`MARKETING_VERSION = ${nextVersion.replaceAll(".", "\\.")};`, "g"),
+  );
+  if (!matches || matches.length < 2) {
+    throw new Error(
+      "Unable to update apps/ios/EdgeEver.xcodeproj/project.pbxproj MARKETING_VERSION.",
+    );
+  }
+  return updated;
+};
+
+const updateReleaseVersions = ({
+  nextVersion,
+  desktopRebuild,
+  mobileRebuild,
+  iosRebuild,
+  changesEn,
+  changesZh,
+  localizedChanges,
+}) => {
   const changedPaths = ["package.json", "release-summary.json"];
   const rootPackage = readJson("package.json");
   rootPackage.version = nextVersion;
@@ -557,6 +597,23 @@ const updateReleaseVersions = ({ nextVersion, desktopRebuild, mobileRebuild, cha
     mobileConfig.expo.android.versionCode += 1;
     writeJson("apps/mobile/app.json", mobileConfig);
     changedPaths.push("apps/mobile/app.json");
+  }
+
+  if (iosRebuild) {
+    const iosVersionPath = "apps/ios/Config/Version.xcconfig";
+    const iosProjectPath = "apps/ios/EdgeEver.xcodeproj/project.pbxproj";
+    writeFileSync(
+      iosVersionPath,
+      updateIosMarketingVersion(readFileSync(iosVersionPath, "utf8"), nextVersion),
+    );
+    writeFileSync(
+      iosProjectPath,
+      updateIosProjectMarketingVersion(
+        readFileSync(iosProjectPath, "utf8"),
+        nextVersion,
+      ),
+    );
+    changedPaths.push(iosVersionPath, iosProjectPath);
   }
   return changedPaths;
 };
@@ -639,6 +696,7 @@ const CHECKPOINT_RUN_FIELDS = [
   "dockerRunId",
   "storeRunId",
   "storeRecoveryRunId",
+  "iosStoreRunId",
   "androidPlaySignatureRunId",
   "windowsUpdateAuditRunId",
 ];
@@ -646,6 +704,7 @@ const CANCELLABLE_CHECKPOINT_RUN_FIELDS = new Set([
   "desktopRunId",
   "mobileRunId",
   "dockerRunId",
+  "iosStoreRunId",
   "androidPlaySignatureRunId",
   "windowsUpdateAuditRunId",
 ]);
@@ -917,7 +976,10 @@ const dispatchStoreDeliveryWorkflow = ({
   repository,
   tag,
   headSha,
-  recoverPlayApk,
+  recoverPlayApk = false,
+  platform = "android",
+  androidTrack = "production",
+  iosBuildNumber = "",
 }) => dispatchReleaseWorkflow({
   repository,
   workflow: RELEASE_WORKFLOWS.storeDelivery,
@@ -925,9 +987,10 @@ const dispatchStoreDeliveryWorkflow = ({
   headSha,
   inputs: {
     release_tag: tag,
-    platform: "android",
-    android_track: "production",
+    platform,
+    android_track: androidTrack,
     recover_play_apk: recoverPlayApk,
+    ios_build_number: iosBuildNumber,
   },
 });
 
@@ -1039,6 +1102,51 @@ const ensurePlayDelivery = async ({
     recordCompletedDelivery({ storeRunId });
     return storeRunId;
   }
+};
+
+const startIosStoreDelivery = async ({
+  repository,
+  tag,
+  headSha,
+  checkpoint,
+  persistCheckpoint,
+}) => {
+  let iosStoreRunId = checkpoint.iosStoreRunId;
+  if (iosStoreRunId) {
+    const existing = viewWorkflowRun({ repository, runId: iosStoreRunId });
+    if (existing.headSha === headSha) {
+      if (existing.status !== "completed") {
+        console.log(`[release] reusing App Store delivery: ${existing.url}`);
+        return iosStoreRunId;
+      }
+      if (existing.conclusion === "success") {
+        console.log(`[release] App Store delivery already succeeded: ${existing.url}`);
+        return iosStoreRunId;
+      }
+      console.log(`[release] rerunning failed App Store delivery: ${existing.url}`);
+      run("gh", [
+        "run",
+        "rerun",
+        String(iosStoreRunId),
+        "--repo",
+        repository,
+        "--failed",
+      ]);
+      await waitForRerunStart({ repository, runId: iosStoreRunId });
+      return iosStoreRunId;
+    }
+  }
+
+  iosStoreRunId = await dispatchStoreDeliveryWorkflow({
+    repository,
+    tag,
+    headSha,
+    platform: "ios",
+  });
+  recordCheckpointRun(checkpoint, "iosStoreRunId", iosStoreRunId);
+  persistCheckpoint();
+  console.log("[release] started App Store delivery");
+  return iosStoreRunId;
 };
 
 const requirePlaySignedDraftApk = async ({
@@ -1390,10 +1498,12 @@ const releaseMain = async (options) => {
   printReleaseCoverageAudit({ audit: commitCoverageAudit, changesEn: options.changesEn });
   const desktopPlan = planNativeRelease("desktop", changedFiles);
   const mobilePlan = planNativeRelease("mobile", changedFiles);
+  const iosPlan = planNativeRelease("ios", changedFiles);
 
   console.log(`[release] ${releaseBaseTag} -> ${tag}`);
   console.log(`[release] desktop: ${desktopPlan.rebuild ? "rebuild" : "reuse"}`);
   console.log(`[release] Android: ${mobilePlan.rebuild ? "rebuild" : "reuse"}`);
+  console.log(`[release] iOS: ${iosPlan.rebuild ? "rebuild" : "reuse"}`);
 
   if (options.dryRun) {
     console.log(buildReleaseNotes({
@@ -1447,8 +1557,10 @@ const releaseMain = async (options) => {
       nextVersion: releaseVersion,
       desktopRebuild: desktopPlan.rebuild,
       mobileRebuild: mobilePlan.rebuild,
+      iosRebuild: iosPlan.rebuild,
       changesEn: options.changesEn,
       changesZh: options.changesZh,
+      localizedChanges: options.localizedChanges,
     });
     run("git", ["add", ...versionPaths]);
     run("git", ["diff", "--cached", "--check"]);
@@ -1559,6 +1671,16 @@ const releaseMain = async (options) => {
     resolveDraftRun("mobileRunId", RELEASE_WORKFLOWS.mobile, "Draft Android assets"),
     resolveDraftRun("dockerRunId", RELEASE_WORKFLOWS.docker, "Draft Docker image"),
   ]);
+
+  if (iosPlan.rebuild) {
+    await startIosStoreDelivery({
+      repository: options.repository,
+      tag,
+      headSha: releaseSha,
+      checkpoint,
+      persistCheckpoint,
+    });
+  }
 
   const androidReleaseReady = (async () => {
     await waitForRun({
@@ -1734,7 +1856,7 @@ const releaseMain = async (options) => {
     throw error;
   }
 
-  run("gh", [
+  const releaseComment = run("gh", [
     "issue",
     "comment",
     String(issueNumber),
@@ -1742,7 +1864,10 @@ const releaseMain = async (options) => {
     options.repository,
     "--body",
     `Released in [${tag}](${releaseUrl}).\n\nRequired local validations, Draft asset and image preparation, and post-publication audits passed.`,
-  ]);
+  ], { allowFailure: true });
+  if (releaseComment.status !== 0) {
+    console.warn(`[release] failed to comment on Issue #${issueNumber} before closing it`);
+  }
   const timingStoreRunId =
     checkpoint.storeRecoveryRunId ??
     checkpoint.storeRunId ??
@@ -1799,6 +1924,24 @@ const releaseMain = async (options) => {
     "--reason",
     "completed",
   ]);
+  console.log(`[release] closed Issue #${issueNumber}`);
+
+  if (iosPlan.rebuild) {
+    try {
+      await waitForRun({
+        repository: options.repository,
+        runId: checkpoint.iosStoreRunId,
+        label: "App Store delivery",
+      });
+    } catch (error) {
+      console.error(
+        `[release] GitHub Release is published and Issue #${issueNumber} is closed; App Store delivery failed and must be retried with bun run publish:stores -- --release `
+        + `${tag} --platform ios`,
+      );
+      throw error;
+    }
+  }
+
   console.log(`[release] ${tag} is complete; Demo deployment is not blocking completion`);
 
   if (options.installDesktop) {

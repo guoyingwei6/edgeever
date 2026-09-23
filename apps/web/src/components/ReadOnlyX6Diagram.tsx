@@ -10,7 +10,7 @@ import {
 
 Graph.registerConnector(MIND_MAP_CONNECTOR_NAME, mindMapConnector, true);
 
-const diagramTitle = (diagram: DiagramDocument, locale: "zh-CN" | "en-US") => {
+const diagramTitle = (diagram: DiagramDocument, locale: "zh-CN" | "en-US" | "ja") => {
   if (locale === "en-US") {
     return diagram.kind === "mind-map" ? "Mind map" : diagram.kind === "architecture" ? "Architecture diagram" : "Flowchart";
   }
@@ -23,7 +23,7 @@ export const ReadOnlyX6Diagram = ({
   theme,
 }: {
   diagram: DiagramDocument;
-  locale: "zh-CN" | "en-US";
+  locale: "zh-CN" | "en-US" | "ja";
   theme: "light" | "dark";
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -47,8 +47,15 @@ export const ReadOnlyX6Diagram = ({
       container,
       width: measureWidth(),
       height: Math.max(1, container.clientHeight),
-      background: { color: cells.canvas },
-      grid: false,
+      grid: (diagram.kind === "architecture" || diagram.kind === "flowchart") ? {
+        size: 20,
+        visible: true,
+        type: "dot",
+        args: {
+          color: theme === "dark" ? "rgba(255, 255, 255, 0.12)" : "rgba(15, 23, 42, 0.08)",
+          thickness: 1.2,
+        },
+      } : false,
       interacting: false,
       panning: { enabled: true },
       mousewheel: { enabled: true, minScale: 0.1, maxScale: 2.5 },
@@ -104,6 +111,7 @@ export const ReadOnlyX6Diagram = ({
       <div
         aria-label={diagramTitle(diagram, locale)}
         className="edgeever-x6-diagram"
+        data-diagram-kind={diagram.kind}
         key={diagram.kind}
         ref={containerRef}
         role="img"
