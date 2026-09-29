@@ -1,6 +1,6 @@
 <div align="center">
   <h1>
-    <img src="assets/brand/edgeever-icon.svg" alt="EdgeEver のロゴ" width="40" align="absmiddle" /> EdgeEver
+    <img src="assets/brand/edgeever-icon.svg" alt="EdgeEver のロゴ" width="48" align="absmiddle" /> EdgeEver
   </h1>
   <p>
     <b>オープンソース、AI ネイティブ、Cloudflare 無料枠 / Docker で自前運用できる Evernote 代替ノート</b>
@@ -10,6 +10,7 @@
     <a href="https://github.com/tianma-if/edgeever/network/members"><img src="https://img.shields.io/github/forks/tianma-if/edgeever?style=social" alt="GitHub Forks" /></a>
     <a href="https://github.com/tianma-if/edgeever/pkgs/container/edgeever"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fghcr-badge.elias.eu.org%2Fapi%2Ftianma-if%2Fedgeever%2Fedgeever&query=downloadCount&style=social&logo=docker&label=Docker%20Pulls" alt="Docker Pulls" /></a>
     <a href="https://www.producthunt.com/products/edgeever?utm_source=other&utm_medium=social"><img src="https://img.shields.io/badge/Product%20Hunt-ea532a?style=social&logo=product-hunt" alt="Product Hunt" /></a>
+    <a href="https://hellogithub.com/repository/tianma-if/edgeever" target="_blank"><img src="https://api.hellogithub.com/v1/widgets/recommend.svg?rid=150fee4403f6433880bda91e9576ac06&claim_uid=TWNAjisURpnhL1l&theme=small" alt="Featured｜HelloGitHub" /></a>
     <a href="https://afdian.com/a/tianma-if"><img src="https://img.shields.io/badge/Afdian-946ce6?style=social&logo=github-sponsors" alt="Sponsor on Afdian" /></a>
   </p>
   <p>
@@ -68,7 +69,7 @@ EdgeEver は、オープンソースのノートと知識ベースの作業領�
 - **導入方法を選べる**：Cloudflare の無料 Serverless、または VPS / NAS / 自宅サーバーの Docker。Cloudflare の無料保存の目安では、個人なら短いノート約 15 万、画像約 5 万。Docker の保存は必要に応じて伸ばせ、ノート数百万件と大きな画像庫にも足ります。
 - **開かれたデータ、囲い込みなし**：標準 SQLite、REST API、MCP、CLI。知識は透明に保存され、特定アプリに縛られません。
 - **欠損のない ZIP バックアップ**：Markdown、Front Matter、入れ子フォルダ、相対パスの添付、版履歴をまとめて書き出し、どこでも復元できます。
-- **ネイティブな AI Agent 連携**：MCP で Claude Code、Codex、Antigravity などがノートを読み、整理し、要約できます。Notion や Feishu Bitable ともつなぎます。
+- **ネイティブな AI Agent 連携**：MCP で Claude Code、Codex、Antigravity、WorkBuddy などの AI Agent がノートを読み、整理し、要約できます。Notion や Feishu Bitable ともつなぎます。
 - **自分の AI モデル**：OpenAI、Anthropic、Gemini 互換と第三者リレーを接続し、全文または選択範囲の要約、要点抽出、校正、翻訳、続きの執筆ができます。
 - **プラグイン API**： [Plugin API](docs/plugin-development.md) で拡張できます。
 - **台数制限のない同期**：商用の端末数上限はありません。Web、PWA、ブラウザ経由で PC、タブレット、モバイルを同期します。
@@ -99,19 +100,23 @@ Cloudflare のオンライン導入は、次のいずれかです。
 
 ### 方法 A: AI Agent で導入（推奨）
 
-次のプロンプトを AI Agent（Codex、Claude、Cursor、workbuddy、Antigravity、OpenClaw、Hermes Agent など）へそのまま送ってください。実行中に GitHub や Cloudflare へのアクセスが求められたら、権限を確認して認可してください。
+次のプロンプトを AI Agent（Codex、Claude、Cursor、WorkBuddy、Antigravity、OpenClaw、Hermes Agent など）へそのまま送ってください。実行中に GitHub や Cloudflare へのアクセスが求められたら、権限を確認して認可してください。
 
 ```text
-EdgeEver をオンラインで導入してください:
+GitHub と Cloudflare のオンライン操作だけで EdgeEver を導入してください:
 1. Fork https://github.com/tianma-if/edgeever.
 2. Cloudflare で D1 `edgeever` と R2 `edgeever-resources` を作成します。
-3. その Fork を Cloudflare Workers & Pages に取り込み、`main` を本番ブランチにします。
-4. Worker Secret `EDGE_EVER_AUTH_PASSWORD` を追加し、ユーザーが選んだパスワードを値にします。
-   このインスタンス専用の、32 文字以上の強いパスワードを推奨します。
-5. 初回ビルドを開始し、`/api/health` と `/api/openapi.json` を確認してから、
-   ユーザー名 `admin` と設定したパスワードでログインできることを確認します。
+3. Workers & Pages で Fork の `main` ブランチから `edgeever` という名前の Worker を作成します。
+   リポジトリのルートを使い、Cloudflare Workers Builds の既定のデプロイコマンドを維持します。
+   その API トークンに D1 の読み取り・編集権限があることを確認して Save and Deploy を選択します。
+4. Worker の作成後、ユーザーが指定したパスワードを実行時 Secret
+   `EDGE_EVER_AUTH_PASSWORD` に設定します
+   （32 文字以上を推奨）。管理者ユーザー名の既定値は `admin` です。別の名前を指定された場合は、
+   次のビルド前に Workers Builds 変数 `EDGE_EVER_AUTH_USERNAME` を設定します。
+5. 再度ビルドし、`/api/health` と `/api/openapi.json` を確認してから、
+   その管理者ユーザー名とパスワードでログインできることを確認します。
 6. GitHub Actions の `Update deployed EdgeEver` を有効にし、一度手動実行して、
-   Fork が最新の機能と修正を自動で受け取れるようにします。
+   Fork が今後の安定版と修正を自動で受け取れるようにします。
 ```
 
 > 詳細な要件: [AI Agent Cloudflare Deployment](docs/agent-deploy-cloudflare.md)。
@@ -122,12 +127,14 @@ EdgeEver をオンラインで導入してください:
 
 1. **リポジトリを Fork**：GitHub 右上の **Fork** で、EdgeEver を自分のアカウントへ Fork します。
 2. **Cloudflare リソースを作成**：D1 `edgeever` と R2 `edgeever-resources` を作ります。
-3. **プロジェクトを取り込み、設定**：Fork を Cloudflare **Workers & Pages** に取り込み、`main` を本番ブランチにします。binding は導入コマンドが作ります。Fork 内のファイルは編集しないでください。
-4. **管理者パスワードを設定**：Worker Secret `EDGE_EVER_AUTH_PASSWORD` を追加し、管理者ログイン用パスワードを値にします。このインスタンス専用の、32 文字以上の強いパスワードを推奨します。
-5. **ビルドと確認**：初回ビルドを開始します。導入後、`/api/health` が `200` を返すことと、ユーザー名 `admin` と設定したパスワードでログインできることを確認します。
-6. **自動更新を有効化**：Fork の **Actions** タブで **I understand my workflows, go ahead and enable them** を押し、**Update deployed EdgeEver** を一度手動実行して、以降の機能と修正を自動で受け取れるようにします。
+3. **プロジェクトを取り込み、設定**：Cloudflare **Workers & Pages** で Fork の `main` ブランチから `edgeever` という名前の Worker を作成します。リポジトリのルートと、Cloudflare 上で実行される Workers Builds の既定のデプロイコマンドを使い、API トークンの D1 読み取り・編集権限を確認します。binding はデプロイコマンドが作るため、Fork 内のファイルは編集しないでください。
+4. **管理者パスワードを準備**：管理者ログイン用パスワードを用意します。32 文字以上を推奨します。Worker 作成後、実行時 Secret `EDGE_EVER_AUTH_PASSWORD` に保存します。
+5. **ビルドと確認**：Save and Deploy で Worker が作成され、ビルドが始まります。管理者 Secret がないため失敗した場合は、手順 4 の実行時 Secret を追加して再試行します。管理者ユーザー名の既定値は `admin` です。別の名前を使う場合は、再試行前に Workers Builds 変数 `EDGE_EVER_AUTH_USERNAME` を設定します。導入後に `/api/health` が `200` を返すことを確認し、設定した管理者ユーザー名とパスワードでログインします。
+6. **自動更新を有効化**：Fork の **Actions** タブで **I understand my workflows, go ahead and enable them** を押し、**Update deployed EdgeEver** を一度手動実行して、今後の安定版と修正を自動で受け取れるようにします。
 
 > 📖 手順と設定の詳細は [Online Deployment Guide](docs/deploy-cloudflare-button.md) を見てください。
+
+> 💡 **ドメインとアクセス**：デプロイ完了後は、Cloudflare から自動で割り当てられる `*.workers.dev` ドメインでそのまま利用できるほか、Worker の **Settings → Domains & Routes** で独自のカスタムドメインを紐付けることもできます。
 
 > 💡 **Cloudflare R2 の有効化**：Cloudflare R2 にはノート用途で足りる [無料保存枠](https://developers.cloudflare.com/r2/pricing/#free-tier) がありますが、先に R2 のサブスクリプションを有効にし、支払い方法を登録する必要があります。Cloudflare は [公式に](https://developers.cloudflare.com/billing/get-started/update-billing-info/#supported-payment-methods) UnionPay、Visa、Mastercard などのカードと、PayPal、Apple Pay、Google Pay などを受け付けます。
 
@@ -141,8 +148,6 @@ curl -fsSL https://edgeever.org/install.sh | bash
 
 このコマンドは最新イメージを引き、管理者パスワードを生成し、Docker Compose で EdgeEver を起動し、毎日の自動更新を設定します。
 
-公式コンテナイメージは GitHub Container Registry（GHCR）にあります。中国本土などの一部ネットワークでは遅い、またはタイムアウトすることがあります。引き出せない場合は、導入前に使えるネットワークプロキシか信頼できるレジストリミラーを設定してください。第三者のネットワークやレジストリの可用性と安全性は、利用者自身が判断してください。
-
 手動導入と設定は [Docker deployment guide](docs/deploy-docker.md) を見てください。
 
 ---
@@ -155,13 +160,16 @@ curl -fsSL https://edgeever.org/install.sh | bash
 
 ## ブラウザ Web Clipper
 
-Web Clipper は Chrome、Microsoft Edge、Firefox の公式ストアにあります。使っているブラウザのストアから入れてください（Microsoft Edge は Chrome Web Store 版を直接入れられます）。
-
 <p>
   <a href="https://chromewebstore.google.com/detail/edgeever-web-clipper/gjadpfmanienmlofajibkfkkpfdkclgo"><img src="https://raw.githubusercontent.com/alrra/browser-logos/58881b84c4d73adc03c06fa2c275a7abee02d935/src/chrome/chrome.svg" alt="Google Chrome 向け EdgeEver Web Clipper を入れる" width="36" height="36" /></a>&nbsp;&nbsp;
   <a href="https://chromewebstore.google.com/detail/edgeever-web-clipper/gjadpfmanienmlofajibkfkkpfdkclgo"><img src="https://raw.githubusercontent.com/alrra/browser-logos/58881b84c4d73adc03c06fa2c275a7abee02d935/src/edge/edge.svg" alt="Microsoft Edge 向け EdgeEver Web Clipper を入れる" width="36" height="36" /></a>&nbsp;&nbsp;
   <a href="https://addons.mozilla.org/ja/firefox/addon/edgeever-web-clipper/"><img src="https://raw.githubusercontent.com/alrra/browser-logos/58881b84c4d73adc03c06fa2c275a7abee02d935/src/firefox/firefox.svg" alt="Firefox 向け EdgeEver Web Clipper を入れる" width="36" height="36" /></a>
 </p>
+
+- **スマートな本文抽出**：Web ページの本文を自動抽出し、クリーンな Markdown に変換。元記事の URL とクリップ日時を保持します。
+- **選択テキストと画像のクリップ**：テキストを選択するか画像を右クリックして、ページ全体を保存することなく直接ノートとして保存できます。
+- **X（旧 Twitter）ポストの保存**：ポストを右クリックして長文を自動展開し、投稿者、日時、添付画像とともに完全な形で保存します。
+- **セルフホストへのプライベート直接通信**：クリップした内容は個人の EdgeEver インスタンスに直接送信され、第三者の中継サーバーを経由しません。
 
 ## コミュニティとフィードバック
 

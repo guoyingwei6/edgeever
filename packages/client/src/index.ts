@@ -47,6 +47,8 @@ import type {
   ResourceListItem,
   ResourceStorageSummary,
   ObjectStorageSettings,
+  AccountNoteProse,
+  NoteProsePatch,
   PublicMemoShare,
   TagSummary,
   TiptapDoc,
@@ -58,7 +60,8 @@ import type {
   AiPromptTemplateUpdateInput,
   AiStreamEvent,
   AiGenerateInput,
-  AiTagSuggestionPromptUpdateInput,
+  InfographicAgentEvent,
+  InfographicAgentRequest,
   AiTagSuggestionsRequestInput,
   AiTagSuggestionsResponse,
   SyncBootstrapResponse,
@@ -812,6 +815,14 @@ export const createEdgeEverClient = (options: EdgeEverClientOptions = {}) => {
         body: JSON.stringify({ bodyFont }),
       }),
 
+    getNoteProse: () => request<AccountNoteProse>("/api/v1/me/note-prose"),
+
+    updateNoteProse: (patch: NoteProsePatch) =>
+      request<AccountNoteProse>("/api/v1/me/note-prose", {
+        method: "PUT",
+        body: JSON.stringify(patch),
+      }),
+
     unlockPublicMemoShare: (token: string, password: string) =>
       request<{ ok: true }>(`/api/public/shares/${encodeURIComponent(token)}/unlock`, {
         method: "POST",
@@ -932,12 +943,6 @@ export const createEdgeEverClient = (options: EdgeEverClientOptions = {}) => {
       request<AiSettings>("/api/v1/ai/default-model", {
         method: "PUT",
         body: JSON.stringify({ modelConfigId }),
-      }),
-
-    updateAiTagSuggestionPrompt: (payload: AiTagSuggestionPromptUpdateInput, locale?: string) =>
-      request<AiSettings>(`/api/v1/ai/tag-suggestion-prompt${locale ? `?locale=${encodeURIComponent(locale)}` : ""}`, {
-        method: "PUT",
-        body: JSON.stringify(payload),
       }),
 
     listAiPrompts: (locale?: string) => {
@@ -1090,6 +1095,20 @@ export const createEdgeEverClient = (options: EdgeEverClientOptions = {}) => {
           options.onEvent,
         ),
       );
+    },
+
+    streamInfographicAgent: async (
+      payload: InfographicAgentRequest,
+      streamOptions: { signal?: AbortSignal; onEvent: (event: InfographicAgentEvent) => void },
+    ) => {
+      const { context, response } = await send("/api/v1/ai/infographic-agent", {
+        method: "POST",
+        body: JSON.stringify(payload),
+        signal: streamOptions.signal,
+      });
+      if (!response.ok) await throwRequestError(context, response);
+      if (!response.body) throw new ApiRequestError("Streaming response is unavailable", 502, "ai_stream_unavailable");
+      await consumeEventStream(response.body, streamOptions.onEvent);
     },
 
     streamAiGeneration: async (

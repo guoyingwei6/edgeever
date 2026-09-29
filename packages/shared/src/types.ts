@@ -3,7 +3,7 @@ import type { AiAction, AiPromptParameterKind, AiPromptResultMode } from "./ai-a
 import type { DiagramKind, DiagramSummaryPreview } from "./diagram";
 import type { TableSummaryPreview } from "./table";
 
-export type NoteCreateKind = DiagramKind | "table";
+export type NoteCreateKind = DiagramKind | "infographic" | "table";
 
 export type Notebook = {
   id: string;
@@ -28,6 +28,7 @@ export type MemoSummary = {
   diagramPreview?: DiagramSummaryPreview;
   structuredTable?: boolean;
   tablePreview?: TableSummaryPreview;
+  infographic?: boolean;
   tags: string[];
   isPinned: boolean;
   isArchived: boolean;
@@ -201,8 +202,6 @@ export type AiProviderConfig = {
 export type AiSettings = {
   providers: AiProviderConfig[];
   defaultModelId: string | null;
-  tagSuggestionPrompt: string;
-  tagSuggestionPromptCustomized: boolean;
   encryptionConfigured: boolean;
   readOnly: boolean;
 };

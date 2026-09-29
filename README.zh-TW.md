@@ -1,6 +1,6 @@
 <div align="center">
   <h1>
-    <img src="assets/brand/edgeever-icon.svg" alt="EdgeEver Logo" width="40" align="absmiddle" /> EdgeEver
+    <img src="assets/brand/edgeever-icon.svg" alt="EdgeEver Logo" width="48" align="absmiddle" /> EdgeEver
   </h1>
   <p>
     <b>開源、原生支援 AI、可自由部署的自行託管知識庫與 Evernote（印象筆記）替代方案</b>
@@ -10,6 +10,7 @@
     <a href="https://github.com/tianma-if/edgeever/network/members"><img src="https://img.shields.io/github/forks/tianma-if/edgeever?style=social" alt="GitHub Forks" /></a>
     <a href="https://github.com/tianma-if/edgeever/pkgs/container/edgeever"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fghcr-badge.elias.eu.org%2Fapi%2Ftianma-if%2Fedgeever%2Fedgeever&query=downloadCount&style=social&logo=docker&label=Docker%20Pulls" alt="Docker Pulls" /></a>
     <a href="https://www.producthunt.com/products/edgeever?utm_source=other&utm_medium=social"><img src="https://img.shields.io/badge/Product%20Hunt-ea532a?style=social&logo=product-hunt" alt="Product Hunt" /></a>
+    <a href="https://hellogithub.com/repository/tianma-if/edgeever" target="_blank"><img src="https://api.hellogithub.com/v1/widgets/recommend.svg?rid=150fee4403f6433880bda91e9576ac06&claim_uid=TWNAjisURpnhL1l&theme=small" alt="Featured｜HelloGitHub" /></a>
     <a href="https://afdian.com/a/tianma-if"><img src="https://img.shields.io/badge/愛發電-946ce6?style=social&logo=github-sponsors" alt="愛發電贊助" /></a>
   </p>
   <p>
@@ -68,7 +69,7 @@ EdgeEver 是一款現代化的開源筆記與個人知識庫工作區。它為�
 - **自由選擇部署方式**：既可免費執行於 Cloudflare Serverless，也可透過 Docker 部署到 VPS、NAS 或家用伺服器。按 Cloudflare 免費儲存額度估算，個人部署可容納約 15 萬條短筆記和約 5 萬張圖片；Docker 儲存可按需擴充，輕鬆承載百萬級筆記與海量圖片。
 - **資料開放，不設圍牆**：以標準 SQLite 儲存，提供 REST API、MCP 與 CLI 介面。資料隨時可讀可匯出，不再擔心被任何特定平台綁定。
 - **無損 ZIP 打包與無縫遷移**：一鍵打包匯出包含 Markdown、Front Matter、巢狀目錄及附件的完整檔案，同時保留歷史版本與結構化資料，方便在不同實例間完整還原。
-- **原生 AI Agent 智慧聯動**：內建 MCP（Model Context Protocol）協定，支援 Claude Code、Codex、Antigravity 等 AI 助手直接讀取與整理筆記，也可與 Notion Database、飛書多維表格輕鬆串接。
+- **原生 AI Agent 智慧聯動**：內建 MCP（Model Context Protocol）協定，支援 Claude Code、Codex、Antigravity、WorkBuddy 等 AI Agent 直接讀取與整理筆記，也可與 Notion Database、飛書多維表格輕鬆串接。
 - **接入自己的 AI 模型**：支援新增多個 OpenAI、Anthropic、Gemini 相容服務與第三方中轉平台，在編輯器中隨時對全文或選取範圍進行智慧摘要、重點擷取、文法校對、翻譯與續寫潤飾。
 - **豐富的外掛 API**：可透過[外掛開發文件](docs/plugin-development.zh-CN.md)擴充 EdgeEver。
 - **多端無縫同步，無裝置限制**：自行託管資料無商業限制，擺脫免費帳號僅限 2 台裝置的束縛，在 PC、平板與手機上隨心同步。
@@ -99,19 +100,22 @@ Cloudflare 線上部署可以選擇以下兩種方式之一：
 
 ### 方案一：AI Agent 一鍵部署（建議）
 
-將下方提示詞直接複製傳送給 AI Agent（如 Codex、Claude、Cursor、workbuddy、Antigravity、OpenClaw、Hermes Agent 等）。執行過程中，如需存取 GitHub 或 Cloudflare，請確認權限範圍並依提示完成授權。
+將下方提示詞直接複製傳送給 AI Agent（如 Codex、Claude、Cursor、WorkBuddy、Antigravity、OpenClaw、Hermes Agent 等）。執行過程中，如需存取 GitHub 或 Cloudflare，請確認權限範圍並依提示完成授權。
 
 ```text
-請線上完成 EdgeEver 部署：
+請全程透過 GitHub 和 Cloudflare 線上部署 EdgeEver：
 1. Fork https://github.com/tianma-if/edgeever。
 2. 在 Cloudflare 中建立 D1 `edgeever` 與 R2 `edgeever-resources`。
-3. 將這個 Fork 匯入 Cloudflare Workers & Pages，並將 `main` 設為正式環境分支。
-4. 新增一個名為 `EDGE_EVER_AUTH_PASSWORD` 的 Worker Secret，值為使用者自行設定的
-   管理員登入密碼，建議使用至少 32 個字元且僅用於此實例的強密碼。
-5. 啟動首次建置，驗證 `/api/health`、`/api/openapi.json`，並使用使用者名稱 `admin`
-   和設定的密碼驗證登入。
+3. 在 Workers & Pages 中從 Fork 的 `main` 分支建立名為 `edgeever` 的 Worker。
+   使用儲存庫根目錄，保留 Cloudflare Workers Builds 的預設部署指令，確認其 API Token
+   具備 D1 讀取及編輯權限，然後儲存並部署。
+4. Worker 建立後，設定執行時 Secret `EDGE_EVER_AUTH_PASSWORD`，值為使用者指定的密碼
+   （建議至少 32 個字元）。管理員使用者名稱預設為 `admin`；如需自訂，請在再次建置前
+   設定 Workers Builds 建置變數 `EDGE_EVER_AUTH_USERNAME`。
+5. 再次建置，驗證 `/api/health` 和 `/api/openapi.json`，再用該管理員
+   使用者名稱和密碼驗證登入。
 6. 啟用並手動執行一次名為 `Update deployed EdgeEver` 的 GitHub Actions 工作流程，
-   以便後續自動同步更新，持續獲得 EdgeEver 最新的產品特性與問題修復。
+   以便後續自動同步正式版本，持續獲得 EdgeEver 的功能更新與問題修復。
 ```
 
 > 詳細約定與要求請查看：[AI Agent 線上部署約定](docs/agent-deploy-cloudflare.zh-CN.md)。
@@ -122,12 +126,14 @@ Cloudflare 線上部署可以選擇以下兩種方式之一：
 
 1. **Fork 儲存庫**：在 GitHub 點選右上角 **Fork**，將專案 Fork 到您的個人帳戶下。
 2. **建立 Cloudflare 資源**：建立 D1 `edgeever` 與 R2 `edgeever-resources`。
-3. **匯入並設定專案**：在 Cloudflare **Workers & Pages** 中匯入該 Fork，並將 `main` 設為正式環境分支。binding 由部署指令產生，不要修改 Fork 中的檔案。
-4. **設定管理員密碼**：新增一個名為 `EDGE_EVER_AUTH_PASSWORD` 的 Worker Secret，並將其值設為您要使用的管理員登入密碼。建議使用至少 32 個字元且僅用於此實例的強密碼。
-5. **首次建置與驗證**：啟動首次建置。部署完成後造訪 `/api/health`，確認回傳 `200`，並使用使用者名稱 `admin` 和設定的密碼驗證登入。
-6. **啟用自動更新**：進入 Fork 的 **Actions** 分頁，點選 **I understand my workflows, go ahead and enable them**，然後手動執行一次 **Update deployed EdgeEver**，確保後續能夠自動獲得 EdgeEver 的最新功能與修復。
+3. **匯入並設定專案**：在 Cloudflare **Workers & Pages** 中從 Fork 的 `main` 分支建立名為 `edgeever` 的 Worker。使用儲存庫根目錄，保留由 Cloudflare 線上執行的 Workers Builds 預設部署指令，並確認其 API Token 具備 D1 讀取及編輯權限。binding 由部署指令產生，不要修改 Fork 中的檔案。
+4. **準備管理員密碼**：準備管理員登入密碼，建議至少 32 個字元。Worker 建立後，將它儲存為執行時 Secret `EDGE_EVER_AUTH_PASSWORD`。
+5. **首次建置與驗證**：儲存並部署會建立 Worker 並啟動建置。如因缺少管理員 Secret 而失敗，新增步驟 4 的執行時 Secret 後重試。管理員使用者名稱預設為 `admin`；如需使用其他名稱，請在重試建置前設定 Workers Builds 建置變數 `EDGE_EVER_AUTH_USERNAME`。部署完成後造訪 `/api/health`，確認回傳 `200`，再用設定的管理員使用者名稱和密碼登入。
+6. **啟用自動更新**：進入 Fork 的 **Actions** 分頁，點選 **I understand my workflows, go ahead and enable them**，然後手動執行一次 **Update deployed EdgeEver**，確保後續能夠自動獲得正式版本的功能更新與修復。
 
 > 📖 包含具體參數與建置指令的詳細步驟，請查看 [線上部署完整文件](docs/deploy-cloudflare-button.zh-CN.md)。
+
+> 💡 **網域與存取**：實例部署完成後，可以直接使用 Cloudflare 預設分配的 `*.workers.dev` 網域存取，也可以在 Worker 設定中的 **Settings → Domains & Routes** 綁定自己的自訂網域。
 
 > 💡 **Cloudflare R2 開通**：雖然 Cloudflare R2 儲存提供了足夠寬裕、在筆記場景中完全不會超量的[免費儲存額度](https://developers.cloudflare.com/r2/pricing/#free-tier)，但需先開通 R2 subscription 並綁定付款方式。Cloudflare [官方支援](https://developers.cloudflare.com/billing/get-started/update-billing-info/#supported-payment-methods) 銀聯（UnionPay）、Visa、Mastercard 等金融卡與信用卡，以及 PayPal、Apple Pay、Google Pay 等付款方式。
 
@@ -142,11 +148,6 @@ curl -fsSL https://edgeever.org/install.sh | bash
 此指令會自動拉取最新映像、產生管理員密碼、使用 Docker Compose 啟動
 EdgeEver，並設定每日自動更新。手動部署與設定說明見 [Docker 部署文件](docs/deploy-docker.zh-CN.md)。
 
-EdgeEver 官方容器映像託管於 GitHub Container Registry（GHCR）。部分中國大陸
-網路環境可能出現連線緩慢或逾時。如果無法正常拉取，請在部署前自行設定可用的
-網路代理或可信的映像加速服務。第三方網路及映像服務的可用性與安全性由
-使用者自行評估。
-
 ---
 
 ## 多帳號登入
@@ -157,13 +158,16 @@ EdgeEver 官方容器映像託管於 GitHub Container Registry（GHCR）。部�
 
 ## 瀏覽器網頁擷取擴充功能
 
-網頁擷取擴充功能已在 Chrome、Microsoft Edge 與 Firefox 正式上架。請從對應的瀏覽器商店安裝（Edge 瀏覽器亦可直接安裝 Chrome Web Store 版本）：
-
 <p>
   <a href="https://chromewebstore.google.com/detail/edgeever-web-clipper/gjadpfmanienmlofajibkfkkpfdkclgo"><img src="https://raw.githubusercontent.com/alrra/browser-logos/58881b84c4d73adc03c06fa2c275a7abee02d935/src/chrome/chrome.svg" alt="為 Google Chrome 安裝 EdgeEver 網頁擷取擴充功能" width="36" height="36" /></a>&nbsp;&nbsp;
   <a href="https://chromewebstore.google.com/detail/edgeever-web-clipper/gjadpfmanienmlofajibkfkkpfdkclgo"><img src="https://raw.githubusercontent.com/alrra/browser-logos/58881b84c4d73adc03c06fa2c275a7abee02d935/src/edge/edge.svg" alt="為 Microsoft Edge 安裝 EdgeEver 網頁擷取擴充功能" width="36" height="36" /></a>&nbsp;&nbsp;
   <a href="https://addons.mozilla.org/zh-TW/firefox/addon/edgeever-web-clipper/"><img src="https://raw.githubusercontent.com/alrra/browser-logos/58881b84c4d73adc03c06fa2c275a7abee02d935/src/firefox/firefox.svg" alt="為 Firefox 安裝 EdgeEver 網頁擷取擴充功能" width="36" height="36" /></a>
 </p>
+
+- **智慧內文擷取**：自動擷取網頁文章正文並轉為純淨 Markdown，完整保留來源網址與擷取時間。
+- **選取與右鍵擷取**：反白選取文字或右鍵任意圖片直接儲存為獨立筆記，無需抓取整頁多餘內容。
+- **X (Twitter) 推文擷取**：右鍵單則推文自動展開長文全文，連同作者、發布時間與附圖完整歸檔。
+- **自託管隱私直連**：擷取內容直傳個人自託管執行個體，不經過任何第三方伺服器轉發。
 
 ## 社群與回饋
 

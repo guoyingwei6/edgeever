@@ -1,4 +1,4 @@
-import { useRef, useState, useEffect, useCallback, useMemo, lazy, Suspense, type CSSProperties, type FocusEvent as ReactFocusEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
+import { useRef, useState, useEffect, useLayoutEffect, useCallback, useMemo, lazy, Suspense, type CSSProperties, type FocusEvent as ReactFocusEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { useEditor, EditorContent, type Editor } from "@tiptap/react";
 import { BubbleMenu } from "@tiptap/react/menus";
@@ -34,10 +34,13 @@ import { Button } from "@/components/ui/button";
 import { ClipboardCopyNotice } from "@/components/ClipboardCopyNotice";
 import { MemoEditorHeaderActions } from "@/components/MemoEditorHeaderActions";
 import { MemoEditorMetadataRow } from "@/components/MemoEditorMetadataRow";
-import { MemoEditorTopRowLeading } from "@/components/MemoEditorTopRowLeading";
+import { MemoEditorFocusModeButton, MemoEditorTopRowLeading, MemoEditorUpdatedLabel } from "@/components/MemoEditorTopRowLeading";
+import { MemoEditorToolbarDivider } from "@/components/MemoEditorToolbarChrome";
 import {
-  MEMO_EDITOR_TITLE_REGION_CLASS_NAME,
+  MEMO_EDITOR_READING_GUTTER_CLASS_NAME,
+  MEMO_EDITOR_READING_GUTTER_PROPERTIES_CLASS_NAME,
   MEMO_EDITOR_TOP_ROW_CLASS_NAME,
+  nextTitleStatusClearance,
 } from "@/components/MemoEditorChromeDensity";
 import { MemoTitleInput } from "@/components/MemoTitleInput";
 import { Input } from "@/components/ui/input";
@@ -86,7 +89,7 @@ import {
   type NoteLinkSuggestionLabels,
 } from "./editor/NoteLinkSuggestion";
 import { WeChatIcon } from "./WeChatIcon";
-import { isNamedEditorTheme, useEditorTheme, useMarkdownTheme } from "./ThemeProvider";
+import { useMarkdownTheme } from "./ThemeProvider";
 const MarkdownSourceEditor = lazy(() =>
   import("./editor/MarkdownSourceEditor").then((module) => ({
     default: module.MarkdownSourceEditor,
@@ -111,12 +114,13 @@ import { api } from "@/lib/api";
 import { isDesktopResourceRuntime, stageDesktopResource, toDesktopResourceDownloadUrl, toDesktopResourceUrl } from "@/lib/desktop-resources";
 import { contentReferencesStagedResourceUrl, findMatchingMemoResource, repairMemoStagedResourceUrls, repairTiptapStagedResourceUrls } from "@/lib/staged-resource-repair";
 import { cn, formatDateTime, parseTagsText } from "@/lib/utils";
-import { EDITOR_CONTENT_MAX_WIDTH, EDITOR_CONTENT_MAX_WIDTH_COLLAPSED } from "@/lib/workspace-ui";
+import { editorContentColumnMaxWidth, type EditorContentWidth } from "@/lib/editor-content-width";
 import {
   countMemoCharacters,
   createEdgeEverDocumentExtensions,
   docToMarkdown,
   MEMO_CONTENT_STYLE,
+  noteProseCssVariables,
   markdownToDoc,
   normalizeImageGalleries,
   PLUGIN_EMBED_NODE_TYPE,
@@ -125,6 +129,7 @@ import {
   isPdfAttachment,
   resolveMemoContentDoc,
   type Notebook,
+  type ResolvedNoteProse,
   type MemoDetail,
   type MemoSummary,
   type MemoEditSession,
@@ -132,7 +137,7 @@ import {
   createMemoLinkHref,
   parseMemoLinkHref,
 } from "@edgeever/shared";
-import { DEFAULT_IMAGE_WIDTH_PERCENT } from "@edgeever/shared/image-display";
+import { NEW_IMAGE_WIDTH_PERCENT } from "@edgeever/shared/image-display";
 import { EdgeEverLink } from "@edgeever/shared/editor-link";
 import { createEdgeEverMathematics } from "@edgeever/shared/mathematics";
 import { codeBlockLowlight, EdgeEverCodeBlock } from "@/lib/code-block";
@@ -158,11 +163,9 @@ import {
   writeDesktopReadingProtectionPreference,
   writeEditorOutlineCollapsedPreference,
   writeEditorPhonePreviewPreference,
-  type EditorContentAlignment,
   type MemoDocumentActionRequest,
   type ShortcutSettings,
 } from "@/lib/app-helpers";
-import { isPaperEditorTheme, publishEditorCssVars, resolvePaperEditorTheme } from "@/lib/publish-layout";
 import { ThemeBlock } from "./ThemeBlock";
 import { EditorPhonePreview, PhonePreviewGlyph } from "./EditorPhonePreview";
 import {
@@ -192,6 +195,7 @@ import {
 } from "@/lib/editor-external-link";
 import { insertAiDraftAtTextCursor } from "@/lib/ai-draft-insertion";
 import { createFileBatchQueue, processFileUploadBatch } from "@/lib/file-batch";
+import { resourceToMarkdown } from "@/lib/markdown-resource-paste";
 import { MEMO_ID_REMAPPED_EVENT, MEMO_SYNC_ACKNOWLEDGED_EVENT } from "@/lib/sync-events";
 import { useStandaloneMobileEditor } from "@/hooks/useStandaloneMobileEditor";
 import { statusSettleMotion } from "@/lib/motion";
@@ -287,7 +291,8 @@ type EditorPaneProps = {
   repository: EdgeEverRepository;
   desktopFocusMode: boolean;
   onToggleDesktopFocusMode: () => void;
-  editorContentAlignment: EditorContentAlignment;
+  editorContentWidth: EditorContentWidth;
+  noteProse: ResolvedNoteProse;
   mobileDefaultEditMemoId: string | null;
   pendingInsertFiles?: { memoId: string; files: File[] } | null;
   onPendingInsertFilesConsumed?: () => void;
@@ -326,6 +331,7 @@ type EditorPaneProps = {
   pluginHost: EdgeEverPluginHost;
   pluginNavigationRequest?: { id: number; noteId: string; search: string } | null;
   onOpenExecutionCenter: () => void;
+  demoMode?: boolean;
 };
 
 type RichEditorPaneProps = EditorPaneProps & {
@@ -345,7 +351,7 @@ export const EditorPane = (props: EditorPaneProps) => {
 
   if (editingActive) {
     return (
-      <div className="flex h-full min-h-0 items-center justify-center bg-card text-sm font-medium text-slate-400">
+      <div className="flex h-full min-h-0 items-center justify-center bg-transparent text-sm font-medium text-slate-400">
         {t("editor.openEditor")}
       </div>
     );
@@ -364,7 +370,8 @@ const RichEditorPane = ({
   repository,
   desktopFocusMode,
   onToggleDesktopFocusMode,
-  editorContentAlignment,
+  editorContentWidth,
+  noteProse,
   mobileDefaultEditMemoId,
   pendingInsertFiles = null,
   onPendingInsertFilesConsumed,
@@ -403,10 +410,10 @@ const RichEditorPane = ({
   pluginHost,
   pluginNavigationRequest,
   onOpenExecutionCenter,
+  demoMode = false,
   onRequestMobileNativeEdit,
 }: RichEditorPaneProps) => {
   const { t, i18n } = useTranslation();
-  const { customEditorTheme, editorTheme } = useEditorTheme();
   const { markdownTheme } = useMarkdownTheme();
   const queryClient = useQueryClient();
   const resourceInsertionLimit = useMemo(createFileBatchQueue, []);
@@ -478,11 +485,16 @@ const RichEditorPane = ({
   const [isMobileViewport, setIsMobileViewport] = useState(() =>
     typeof window === "undefined" ? false : window.matchMedia(MOBILE_EDITOR_QUERY).matches
   );
+  const [isDesktopColumn, setIsDesktopColumn] = useState(() =>
+    typeof window === "undefined" ? false : window.matchMedia("(min-width: 1024px)").matches
+  );
   const [isMobileEditing, setIsMobileEditing] = useState(false);
   const [desktopReadingProtection, setDesktopReadingProtection] = useState(readDesktopReadingProtectionPreference);
   const [mobilePlainText, setMobilePlainText] = useState("");
   const [mobileToolbarOpen, setMobileToolbarOpen] = useState(false);
-  const [editorOutlineCollapsed, setEditorOutlineCollapsed] = useState(readEditorOutlineCollapsedPreference);
+  const [editorOutlineCollapsed, setEditorOutlineCollapsed] = useState(() =>
+    readEditorOutlineCollapsedPreference({ defaultCollapsed: !demoMode })
+  );
   const [phonePreviewOpen, setPhonePreviewOpen] = useState(readEditorPhonePreviewPreference);
   const [memoIdCopyNotice, setMemoIdCopyNotice] = useState<{ status: "copied" | "error"; id: string } | null>(null);
   const handledSaveAndSyncTokenRef = useRef(saveAndSyncToken);
@@ -521,6 +533,22 @@ const RichEditorPane = ({
     enabled: noteLinkPickerOpen,
   });
   const [editorScrollContainer, setEditorScrollContainer] = useState<HTMLDivElement | null>(null);
+  const [editorScrollbarGutter, setEditorScrollbarGutter] = useState(0);
+  const [headerTitleSlot, setHeaderTitleSlot] = useState<HTMLDivElement | null>(null);
+  const [headerStatusCluster, setHeaderStatusCluster] = useState<HTMLDivElement | null>(null);
+  const [titleStatusClearancePx, setTitleStatusClearancePx] = useState(0);
+  useLayoutEffect(() => {
+    const element = editorScrollContainer;
+    if (!element) return;
+    const measure = () => {
+      const reserved = element.offsetWidth - element.clientWidth;
+      setEditorScrollbarGutter(reserved > 1 ? reserved / 2 : 0);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [editorScrollContainer]);
   const setEditorScrollContainerRef = useCallback((element: HTMLDivElement | null) => {
     editorScrollContainerRef.current = element;
     setEditorScrollContainer(element);
@@ -797,6 +825,14 @@ const RichEditorPane = ({
   }, []);
 
   useEffect(() => {
+    const mediaQuery = window.matchMedia("(min-width: 1024px)");
+    const updateDesktopColumn = () => setIsDesktopColumn(mediaQuery.matches);
+    updateDesktopColumn();
+    mediaQuery.addEventListener("change", updateDesktopColumn);
+    return () => mediaQuery.removeEventListener("change", updateDesktopColumn);
+  }, []);
+
+  useEffect(() => {
     setIsMobileEditing(false);
     setMobileToolbarOpen(false);
   }, [memo?.id]);
@@ -886,6 +922,39 @@ const RichEditorPane = ({
     }
   }, [focusMobileInputTarget, isMobileViewport, memo?.id, mobileDefaultEditMemoId, onMobileDefaultEditConsumed, readOnly]);
 
+  const uploadEditorResource = useCallback(async (targetMemoId: string, uploadFile: File, isImage: boolean) => {
+    try {
+      const resource = (await repository.uploadMemoResource(targetMemoId, uploadFile)).resource;
+      return { ...resource, url: toDesktopResourceUrl(resource.url) };
+    } catch (error) {
+      if (!isDesktopResourceRuntime()) throw error;
+      const listed = await repository.listResources().catch(() => ({ resources: [] as Array<{ memoId?: string; url: string; filename?: string | null; kind?: string | null; mimeType?: string | null; byteSize?: number }> }));
+      const existing = findMatchingMemoResource(
+        listed.resources.filter((item) => item.memoId === targetMemoId),
+        uploadFile.name,
+        isImage ? "image" : "attachment",
+      );
+      if (existing) {
+        return {
+          kind: isImage ? "image" as const : "attachment" as const,
+          filename: existing.filename || uploadFile.name,
+          mimeType: existing.mimeType || uploadFile.type || null,
+          byteSize: existing.byteSize ?? uploadFile.size,
+          url: toDesktopResourceUrl(existing.url),
+        };
+      }
+      const staged = await stageDesktopResource(targetMemoId, uploadFile);
+      if (!staged) throw error;
+      return {
+        kind: isImage ? "image" as const : "attachment" as const,
+        filename: uploadFile.name,
+        mimeType: uploadFile.type || null,
+        byteSize: uploadFile.size,
+        url: `edgeever-staged://${staged.id}`,
+      };
+    }
+  }, [repository]);
+
   const insertResourceFiles = useCallback((files: File[]) => {
     const currentMemo = memoRef.current;
     const currentEditor = editorRef.current;
@@ -941,44 +1010,7 @@ const RichEditorPane = ({
         setImageUploadState("uploading");
         if (placeholder) updateImageUploadPlaceholder(editorRef.current, placeholder,
           t("editor.uploadState.uploading"));
-        let resource: {
-          kind: "image" | "attachment";
-          filename: string | null;
-          mimeType: string | null;
-          byteSize: number;
-          url: string;
-        };
-        try {
-          const uploadedResource = (await repository.uploadMemoResource(targetMemoId, uploadFile)).resource;
-          resource = { ...uploadedResource, url: toDesktopResourceUrl(uploadedResource.url) };
-        } catch (error) {
-          if (!isDesktopResourceRuntime()) throw error;
-          const listed = await repository.listResources().catch(() => ({ resources: [] as Array<{ memoId?: string; url: string; filename?: string | null; kind?: string | null; mimeType?: string | null; byteSize?: number }> }));
-          const existing = findMatchingMemoResource(
-            listed.resources.filter((item) => item.memoId === targetMemoId),
-            uploadFile.name,
-            isImage ? "image" : "attachment",
-          );
-          if (existing) {
-            resource = {
-              kind: isImage ? "image" : "attachment",
-              filename: existing.filename || uploadFile.name,
-              mimeType: existing.mimeType || uploadFile.type || null,
-              byteSize: existing.byteSize ?? uploadFile.size,
-              url: toDesktopResourceUrl(existing.url),
-            };
-          } else {
-            const staged = await stageDesktopResource(targetMemoId, uploadFile);
-            if (!staged) throw error;
-            resource = {
-              kind: isImage ? "image" : "attachment",
-              filename: uploadFile.name,
-              mimeType: uploadFile.type || null,
-              byteSize: uploadFile.size,
-              url: `edgeever-staged://${staged.id}`,
-            };
-          }
-        }
+        const resource = await uploadEditorResource(targetMemoId, uploadFile, isImage);
         if (resource.kind === "image") {
           imageReadiness.push(waitForImageSourceReady(resource.url));
         }
@@ -1006,7 +1038,7 @@ const RichEditorPane = ({
               src: resource.url,
               alt: file.name,
               title: file.name,
-              width: DEFAULT_IMAGE_WIDTH_PERCENT,
+              width: NEW_IMAGE_WIDTH_PERCENT,
             },
           };
         }
@@ -1082,7 +1114,7 @@ const RichEditorPane = ({
       });
     });
     return true;
-  }, [queryClient, repository, resourceInsertionLimit, t]);
+  }, [queryClient, resourceInsertionLimit, t, uploadEditorResource]);
 
   const pluginEmbedExtension = useMemo(() => createPluginEmbedExtension(pluginHost), [pluginHost]);
   const inlineFieldExtension = useMemo(() => createInlineFieldExtension(i18n.language), [i18n.language]);
@@ -1276,11 +1308,38 @@ const RichEditorPane = ({
   } = useEditorMarkdownMode({
     editor,
     editorScrollContainerRef,
-    effectiveReadOnly,
+    // Reading protection is a view, so it must not block switching back to rich text or Markdown.
+    effectiveReadOnly: readOnly || (isMobileViewport && !mobileEditingActive),
     getMemoId: () => memoRef.current?.id,
     hydratingRef,
   });
   const useMarkdownSourceEditor = !useMobilePlainTextEditor && isMarkdownMode;
+
+  const uploadMarkdownPasteFiles = useCallback(async (files: File[]) => {
+    const targetMemoId = memoRef.current?.id;
+    if (!targetMemoId || effectiveReadOnly) return "";
+    setImageUploadState("uploading");
+    const results = await processFileUploadBatch(files, async (file) => {
+      const shouldCompress = SUPPORTED_PASTE_IMAGE_TYPES.has(file.type) && imageCompressionEnabledRef.current;
+      if (!shouldCompress) return file;
+      setImageUploadState("compressing");
+      return (await compressImageForUpload(file)).file;
+    }, async (uploadFile, file) => {
+      if (memoRef.current?.id !== targetMemoId) throw new Error("The active note changed during upload");
+      setImageUploadState("uploading");
+      return uploadEditorResource(targetMemoId, uploadFile, SUPPORTED_PASTE_IMAGE_TYPES.has(file.type));
+    });
+    if (results.some((result) => result.status === "fulfilled")) {
+      void queryClient.invalidateQueries({ queryKey: ["resources"] });
+    }
+    const failed = results.some((result) => result.status === "rejected");
+    setImageUploadState(failed ? "error" : "idle");
+    if (failed) window.setTimeout(() => setImageUploadState("idle"), 2200);
+    return results
+      .filter((result) => result.status === "fulfilled")
+      .map((result) => resourceToMarkdown(result.value, result.file.name))
+      .join("\n\n");
+  }, [effectiveReadOnly, queryClient, uploadEditorResource]);
 
   useEffect(() => {
     const syncPreference = (event?: Event) => {
@@ -2891,8 +2950,22 @@ const RichEditorPane = ({
       return;
     }
 
+    if (desktopReadingProtection) {
+      setDesktopReadingProtection(false);
+      writeDesktopReadingProtectionPreference(false);
+    }
     handleMarkdownModeChange();
-  }, [editorModeToggleToken, editorShortcutBlocked, handleMarkdownModeChange, useMobilePlainTextEditor]);
+  }, [desktopReadingProtection, editorModeToggleToken, editorShortcutBlocked, handleMarkdownModeChange, useMobilePlainTextEditor]);
+
+  const editorView = useMarkdownSourceEditor ? "markdown" : "rich";
+  const selectEditorView = useCallback((view: "rich" | "markdown") => {
+    if (desktopReadingProtection) {
+      setDesktopReadingProtection(false);
+      writeDesktopReadingProtectionPreference(false);
+    }
+    if (view === "markdown" && !isMarkdownMode) handleMarkdownModeChange();
+    if (view === "rich" && isMarkdownMode) handleMarkdownModeChange();
+  }, [desktopReadingProtection, handleMarkdownModeChange, isMarkdownMode]);
 
   useEffect(() => {
     if (handledOutlineToggleTokenRef.current === outlineToggleToken) {
@@ -3253,9 +3326,35 @@ const RichEditorPane = ({
     title,
   });
 
+  useLayoutEffect(() => {
+    const title = headerTitleSlot;
+    const status = headerStatusCluster;
+    if (!title || !status) return;
+    let frame = 0;
+    const measure = () => {
+      const titleRect = title.getBoundingClientRect();
+      const statusRect = status.getBoundingClientRect();
+      if (titleRect.width < 1 || statusRect.width < 1) return;
+      const paddingRight = Number.parseFloat(getComputedStyle(title).paddingRight) || 0;
+      const inputRight = titleRect.right - paddingRight;
+      setTitleStatusClearancePx((current) => nextTitleStatusClearance(current, inputRight, statusRect.left));
+    };
+    measure();
+    const observer = new ResizeObserver(() => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(measure);
+    });
+    observer.observe(title);
+    observer.observe(status);
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
+  }, [characterCount, hasUnsavedChanges, headerStatusCluster, headerTitleSlot, saveState]);
+
   if (isSelectionMode) {
     return (
-      <div className="flex h-full min-w-0 flex-col bg-card">
+      <div className="flex h-full min-w-0 flex-col bg-transparent">
         {selectionActionBar}
       </div>
     );
@@ -3263,7 +3362,7 @@ const RichEditorPane = ({
 
   if (isLoading && !memo) {
     return (
-      <div className="flex h-full min-w-0 flex-col bg-card">
+      <div className="flex h-full min-w-0 flex-col bg-transparent">
         <EmptyEditorHeader />
         {selectionActionBar}
         <div className="flex min-h-0 flex-1 items-center justify-center text-sm text-slate-500">{t("editor.loading")}</div>
@@ -3273,7 +3372,7 @@ const RichEditorPane = ({
 
   if (!memo) {
     return (
-      <div className="flex h-full min-w-0 flex-col bg-card">
+      <div className="flex h-full min-w-0 flex-col bg-transparent">
         <EmptyEditorHeader />
         {selectionActionBar}
         <div className="flex min-h-0 flex-1 items-center justify-center px-8 text-center">
@@ -3306,7 +3405,7 @@ const RichEditorPane = ({
     imageUploadState === "error"
       ? "bg-rose-50 text-rose-700"
       : imageUploadState !== "idle"
-        ? "bg-emerald-50 text-emerald-700"
+        ? "bg-slate-100 text-slate-700"
         : saveStateClassName;
 
   const updatedLabel = formatDateTime(memo.updatedAt);
@@ -3457,8 +3556,19 @@ const RichEditorPane = ({
         deleteDescription: t("editor.attachmentActions.deleteDescription"),
       };
 
+  const editorColumnMatchesArticle = !useMarkdownSourceEditor;
+  const contentColumnMode = desktopFocusMode ? "focus" : editorOutlineCollapsed ? "collapsed" : "reading";
+  const contentColumnMaxWidth = editorContentColumnMaxWidth(editorContentWidth, contentColumnMode);
+  const focusTitleMaxWidth = editorContentColumnMaxWidth(editorContentWidth, "focus");
+  const savedQuietly = saveState !== "saving"
+    && saveState !== "error"
+    && saveState !== "conflict"
+    && saveState !== "queued"
+    && !hasUnsavedChanges;
+  const saveStatusLabel = `${saveLabel} · ${t("editor.characterCount", { count: characterCount })}`;
+
   return (
-    <div className="relative flex h-full min-w-0 flex-col bg-card">
+    <div className="relative flex h-full min-w-0 flex-col bg-transparent">
       {selectionActionBar}
       <ExternalLinkDialog
         open={externalLinkDialogOpen}
@@ -3509,12 +3619,31 @@ const RichEditorPane = ({
           onInsert={insertMemoLink}
         />
       )}
-      <header className="shrink-0 border-b border-slate-200 bg-card">
+      <header className="shrink-0 border-b border-[var(--workspace-divider)] bg-transparent">
         <div className={MEMO_EDITOR_TOP_ROW_CLASS_NAME}>
+          <div
+            className={cn(
+              "flex min-w-0 flex-1",
+              desktopFocusMode && "mx-auto w-full max-w-[1400px]",
+            )}
+            style={editorColumnMatchesArticle && editorScrollbarGutter > 0 ? { paddingRight: editorScrollbarGutter } : undefined}
+          >
+          <div
+            className={cn(
+              "min-w-0 w-full",
+              isDesktopColumn && desktopFocusMode && "mx-auto",
+            )}
+            style={{
+              ...(isDesktopColumn && desktopFocusMode ? { maxWidth: focusTitleMaxWidth } : {}),
+              ...(titleStatusClearancePx > 0 ? { paddingRight: titleStatusClearancePx } : {}),
+            }}
+          >
+          <div
+            ref={setHeaderTitleSlot}
+            className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 px-4 sm:flex-nowrap"
+          >
           <MemoEditorTopRowLeading
-            desktopFocusMode={desktopFocusMode}
-            updatedLabel={updatedLabel}
-            onToggleDesktopFocusMode={onToggleDesktopFocusMode}
+            className="min-w-0 flex-1"
             mobileBackButton={(
               <Button
                 className="lg:hidden"
@@ -3528,50 +3657,77 @@ const RichEditorPane = ({
                 <ChevronLeft className="h-4 w-4" />
               </Button>
             )}
+            titleInput={(
+              <MemoTitleInput
+                className="w-full min-w-0 px-2"
+                value={title}
+                readOnly={effectiveReadOnly}
+                onValueChange={(nextTitle) => {
+                  setTitle(nextTitle);
+                  persistCurrentDraft(nextTitle, tagsText, getMobilePlainTextValue());
+                  markDirty();
+                }}
+                placeholder={t("common.untitledMemo")}
+              />
+            )}
           />
+          <MemoEditorMetadataRow
+            rowClassName="shrink-0 flex-nowrap"
+            contentMarkdown={currentMarkdownForAi}
+            disabled={effectiveReadOnly}
+            mobileNotebookPickerOpen={mobileNotebookSheetOpen}
+            notebookOptions={notebookOptions}
+            notebookUpdatePending={notebookUpdatePending || saveMutation.isPending}
+            repository={repository}
+            selectedNotebookId={memo.notebookId}
+            tagsText={tagsText}
+            title={title}
+            onMobileNotebookPickerOpenChange={setMobileNotebookSheetOpen}
+            onNotebookChange={handleNotebookChange}
+            onTagsChange={(nextTagsText) => {
+              setTagsText(nextTagsText);
+              persistCurrentDraft(title, nextTagsText, getMobilePlainTextValue());
+              markDirty();
+            }}
+            trailingActions={(
+              <>
+                {!readOnly && (
+                  <IconTooltip label={`${t(desktopReadingProtection ? "editor.disableReadingProtection" : "editor.enableReadingProtection")} (${formatShortcutBinding(shortcutSettings.toggleReadingProtection)})`}>
+                    <Button
+                      className={cn(
+                        "hidden h-7 w-7 shrink-0 sm:inline-flex",
+                        desktopReadingProtection && "bg-slate-100 text-slate-700 ring-1 ring-inset ring-slate-300 hover:bg-slate-200 hover:text-slate-900"
+                      )}
+                      size="icon"
+                      variant={desktopReadingProtection ? "soft" : "ghost"}
+                      aria-label={`${t(desktopReadingProtection ? "editor.disableReadingProtection" : "editor.enableReadingProtection")} (${formatShortcutBinding(shortcutSettings.toggleReadingProtection)})`}
+                      aria-pressed={desktopReadingProtection}
+                      onClick={toggleDesktopReadingProtection}
+                    >
+                      {desktopReadingProtection ? <Lock className="h-3.5 w-3.5" /> : <LockOpen className="h-3.5 w-3.5" />}
+                    </Button>
+                  </IconTooltip>
+                )}
+              </>
+            )}
+          />
+          </div>
+          </div>
+          </div>
 
-          <div className="flex shrink-0 items-center gap-1">
-            {isMemoShared && !readOnly && (
-              <Button
-                className="h-8 gap-1.5 rounded-full bg-emerald-50 px-2 text-xs font-semibold text-emerald-700 ring-1 ring-inset ring-emerald-200 hover:bg-emerald-100 hover:text-emerald-800 focus-visible:ring-emerald-500"
-                size="sm"
-                variant="ghost"
-                type="button"
-                title={t("sharing.manage")}
-                aria-label={t("sharing.manage")}
-                onClick={() => setShareOpen(true)}
-              >
-                <Share2 className="h-3.5 w-3.5" aria-hidden="true" />
-                <span className="hidden sm:inline">{t("sharing.active")}</span>
-              </Button>
-            )}
-            {!readOnly && !isMemoShared && !mobileEditingActive && (
-              <Button
-                className="h-8 w-8 text-slate-500 sm:hidden"
-                size="icon"
-                variant="ghost"
-                type="button"
-                title={t(isLocalMemoId(memo.id) ? "sharing.afterSync" : "sharing.action")}
-                aria-label={t(isLocalMemoId(memo.id) ? "sharing.afterSync" : "sharing.action")}
-                disabled={isLocalMemoId(memo.id)}
-                onClick={() => setShareOpen(true)}
-              >
-                <Share2 className="h-4 w-4" aria-hidden="true" />
-              </Button>
-            )}
-            <span
-              className="hidden whitespace-nowrap px-1.5 text-xs tabular-nums text-slate-400 sm:inline-flex"
-              title={t("editor.characterCount", { count: characterCount })}
-            >
-              {t("editor.characterCount", { count: characterCount })}
-            </span>
+          <div ref={setHeaderStatusCluster} className="absolute right-1 top-0 flex h-full shrink-0 items-center gap-1 sm:right-2">
+            <div className="flex min-w-0 items-center gap-1.5">
+              <MemoEditorUpdatedLabel updatedLabel={updatedLabel} />
+              <span className="hidden shrink-0 whitespace-nowrap text-xs tabular-nums text-slate-400 sm:inline">
+                {t("editor.characterCount", { count: characterCount })}
+              </span>
             {imageUploadState !== "idle" && (
               <span
                 className={cn(
                   "hidden rounded-md px-2 py-1 text-xs font-medium md:inline-flex",
                   imageUploadState === "error"
                     ? "bg-rose-50 text-rose-700"
-                    : "bg-emerald-50 text-emerald-700"
+                    : "bg-slate-100 text-slate-700"
                 )}
               >
                 {imageUploadState === "error"
@@ -3581,13 +3737,16 @@ const RichEditorPane = ({
                     : t("editor.uploadState.fileUploading")}
               </span>
             )}
+            <IconTooltip label={saveConflictReason ? `${saveStatusLabel}. ${saveConflictReason}` : saveStatusLabel}>
             <m.span
               key={`${saveState}-${String(hasUnsavedChanges)}`}
-              className={cn("hidden items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium sm:inline-flex", saveStateClassName)}
+              className={cn(
+                "hidden items-center gap-1 rounded-md text-xs font-medium sm:inline-flex",
+                savedQuietly ? "px-1 text-slate-400" : cn("px-1.5 py-0.5", saveStateClassName),
+              )}
               role="status"
               aria-live="polite"
-              title={saveConflictReason ?? undefined}
-              aria-label={saveState === "conflict" && saveConflictReason ? `${saveLabel}. ${saveConflictReason}` : undefined}
+              aria-label={saveState === "conflict" && saveConflictReason ? `${saveStatusLabel}. ${saveConflictReason}` : saveStatusLabel}
               {...statusSettleMotion}
             >
               {saveState === "saving" ? (
@@ -3599,11 +3758,12 @@ const RichEditorPane = ({
               ) : (
                 <Check className="h-3 w-3" aria-hidden="true" />
               )}
-              {saveLabel}
+              {savedQuietly ? null : saveLabel}
             </m.span>
+            </IconTooltip>
             <m.span
               key={`${imageUploadState}-${saveState}-${String(hasUnsavedChanges)}`}
-              className={cn("inline-flex max-w-[5.5rem] truncate rounded-full px-2 py-1 text-[11px] font-medium sm:hidden", mobileStatusClassName)}
+              className={cn("inline-flex max-w-[5.5rem] truncate rounded-full px-2 py-1 text-xs font-medium sm:hidden", mobileStatusClassName)}
               role="status"
               aria-live="polite"
               title={saveConflictReason ?? undefined}
@@ -3612,9 +3772,37 @@ const RichEditorPane = ({
             >
               {mobileStatusLabel}
             </m.span>
+            </div>
+            <MemoEditorToolbarDivider className="mx-0.5 hidden h-4 sm:block" />
+            <div className="flex items-center gap-0.5">
+            <MemoEditorFocusModeButton
+              desktopFocusMode={desktopFocusMode}
+              onToggleDesktopFocusMode={onToggleDesktopFocusMode}
+            />
+            {!readOnly && (!mobileEditingActive || isMemoShared) && (
+              <IconTooltip label={t(isLocalMemoId(memo.id) ? "sharing.afterSync" : isMemoShared ? "sharing.manage" : "sharing.action")}>
+                <Button
+                  className={cn(
+                    "h-8 w-8",
+                    isMemoShared
+                      ? "bg-[#d4d4d4] text-[#2a2a2a] hover:bg-[#e4e4e4] hover:text-[#2a2a2a]"
+                      : "text-slate-500",
+                  )}
+                  size="icon"
+                  variant="ghost"
+                  type="button"
+                  aria-pressed={isMemoShared}
+                  aria-label={t(isLocalMemoId(memo.id) ? "sharing.afterSync" : isMemoShared ? "sharing.manage" : "sharing.action")}
+                  disabled={isLocalMemoId(memo.id)}
+                  onClick={() => setShareOpen(true)}
+                >
+                  <Share2 className="h-4 w-4" aria-hidden="true" />
+                </Button>
+              </IconTooltip>
+            )}
             {mobileEditingActive && !readOnly && (
               <button
-                className="inline-flex h-8 items-center justify-center rounded-full bg-slate-950 px-3 text-xs font-semibold text-white transition hover:bg-slate-800 disabled:bg-slate-200 disabled:text-slate-500 sm:hidden"
+                className="inline-flex h-8 items-center justify-center rounded-full bg-slate-700 px-3 text-xs font-semibold text-slate-50 transition hover:bg-slate-800 disabled:bg-slate-200 disabled:text-slate-500 sm:hidden"
                 type="button"
                 disabled={mobileDoneDisabled}
                 onClick={handleMobileDone}
@@ -3662,7 +3850,7 @@ const RichEditorPane = ({
             )}
             <MemoEditorHeaderActions
               moreButtonClassName={cn(!mobileEditingActive && !readOnly && "hidden sm:inline-flex")}
-              moreMenuClassName="w-44 rounded-md"
+              moreMenuClassName="w-56 rounded-md"
               onOpenExecutionCenter={onOpenExecutionCenter}
               onSearch={() => openNoteSearch()}
               onSystemInfoOpenChange={setSystemInfoOpen}
@@ -3670,82 +3858,55 @@ const RichEditorPane = ({
                 <>
                   {!effectiveReadOnly && (
                     <IconTooltip label={`${t("aiAssistant.open")} (${formatShortcutBinding(shortcutSettings.openAiAssistant)})`}>
-                      <Button className="hidden h-8 w-8 text-emerald-600 transition-colors hover:bg-emerald-50 hover:text-emerald-800 focus-visible:ring-2 focus-visible:ring-emerald-300 sm:inline-flex" size="icon" variant="ghost" aria-label={t("aiAssistant.open")} onClick={openAiAssistant}>
-                        <Sparkles className="h-5 w-5" strokeWidth={2.25} />
+                      <Button className="hidden h-8 w-8 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-950 focus-visible:ring-2 focus-visible:ring-slate-300 sm:inline-flex" size="icon" variant="ghost" aria-label={t("aiAssistant.open")} onClick={openAiAssistant}>
+                        <Sparkles className="h-4 w-4" strokeWidth={1.75} />
                       </Button>
                     </IconTooltip>
                   )}
-                  {!isMobileViewport && !useMobilePlainTextEditor && !useMarkdownSourceEditor && (
-                    <TooltipProvider delayDuration={0} skipDelayDuration={0}>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            className={cn(
-                              "hidden h-8 w-8 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-950 focus-visible:ring-2 focus-visible:ring-slate-300 xl:inline-flex",
-                              phonePreviewOpen && "bg-emerald-50 text-emerald-800 hover:bg-emerald-50 hover:text-emerald-900",
-                            )}
-                            size="icon"
-                            variant="ghost"
-                            aria-label={phonePreviewOpen ? t("editor.hidePhonePreview") : t("editor.showPhonePreview")}
-                            aria-pressed={phonePreviewOpen || undefined}
-                            onClick={() => handlePhonePreviewChange(!phonePreviewOpen)}
-                          >
-                            <PhonePreviewGlyph className="h-4 w-4" />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent side="bottom">
-                          {phonePreviewOpen ? t("editor.hidePhonePreview") : t("editor.showPhonePreview")}
-                        </TooltipContent>
-                      </Tooltip>
-                    </TooltipProvider>
-                  )}
-                  <TooltipProvider delayDuration={0} skipDelayDuration={0}>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          className={cn(
-                            "hidden h-8 w-8 text-slate-500 transition-all hover:bg-slate-100 hover:text-slate-950 focus-visible:ring-2 focus-visible:ring-slate-300 min-[1600px]:inline-flex",
-                            wechatCopyState === "copying" && "bg-slate-100 text-slate-700",
-                            wechatCopyState === "copied" && "bg-emerald-100 text-emerald-700 ring-1 ring-emerald-200 hover:bg-emerald-100",
-                            wechatCopyState === "error" && "bg-rose-100 text-rose-700 ring-1 ring-rose-200 hover:bg-rose-100"
-                          )}
-                          size="icon"
-                          variant="ghost"
-                          aria-label={t("editor.copyToWeChat")}
-                          onClick={() => void handleCopyToWeChat()}
-                          disabled={!editor || useMobilePlainTextEditor || wechatCopyState === "copying"}
-                        >
-                          {wechatCopyState === "copying" ? (
-                            <LoaderCircle className="h-4 w-4 animate-spin" />
-                          ) : wechatCopyState === "copied" ? (
-                            <Check className="h-5 w-5" strokeWidth={2.75} />
-                          ) : wechatCopyState === "error" ? (
-                            <CircleAlert className="h-5 w-5" strokeWidth={2.25} />
-                          ) : (
-                            <WeChatIcon className="h-5 w-5" />
-                          )}
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent side="bottom">
-                        {t(wechatCopyState === "copying" ? "editor.copyingToWeChat" : wechatCopyState === "copied" ? "editor.copiedToWeChat" : wechatCopyState === "error" ? "editor.copyToWeChatFailed" : "editor.copyToWeChat")}
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
                 </>
               )}
-              textNoteMenuItems={!effectiveReadOnly ? (
+              textNoteMenuItems={(
+                <>
+                  {!isMobileViewport && !useMobilePlainTextEditor && !useMarkdownSourceEditor && (
+                    <DropdownMenuItem
+                      className="flex h-9 w-full items-center gap-2 px-3 text-left text-xs text-slate-700 hover:bg-slate-50 cursor-pointer outline-none"
+                      onClick={() => handlePhonePreviewChange(!phonePreviewOpen)}
+                    >
+                      <PhonePreviewGlyph className="h-4 w-4 text-slate-500" />
+                      {phonePreviewOpen ? t("editor.hidePhonePreview") : t("editor.showPhonePreview")}
+                    </DropdownMenuItem>
+                  )}
                   <DropdownMenuItem
-                    className="flex h-9 w-full items-center gap-2 px-3 text-left text-sm text-emerald-700 hover:bg-emerald-50 cursor-pointer outline-none"
-                    onClick={openAiAssistant}
+                    className="flex h-9 w-full items-center gap-2 px-3 text-left text-xs text-slate-700 hover:bg-slate-50 cursor-pointer outline-none"
+                    disabled={!editor || useMobilePlainTextEditor || wechatCopyState === "copying"}
+                    onClick={() => void handleCopyToWeChat()}
                   >
-                    <Sparkles className="h-4 w-4 text-emerald-600" />
-                    {t("aiAssistant.title")}
+                    {wechatCopyState === "copying" ? (
+                      <LoaderCircle className="h-4 w-4 animate-spin text-slate-500" />
+                    ) : wechatCopyState === "copied" ? (
+                      <Check className="h-4 w-4 text-slate-500" />
+                    ) : wechatCopyState === "error" ? (
+                      <CircleAlert className="h-4 w-4 text-rose-600" />
+                    ) : (
+                      <WeChatIcon className="h-4 w-4 text-slate-500" />
+                    )}
+                    {t(wechatCopyState === "copying" ? "editor.copyingToWeChat" : wechatCopyState === "copied" ? "editor.copiedToWeChat" : wechatCopyState === "error" ? "editor.copyToWeChatFailed" : "editor.copyToWeChat")}
                   </DropdownMenuItem>
-                ) : null}
+                  {!effectiveReadOnly ? (
+                    <DropdownMenuItem
+                      className="flex h-9 w-full items-center gap-2 px-3 text-left text-xs text-slate-700 hover:bg-slate-50 cursor-pointer outline-none sm:hidden"
+                      onClick={openAiAssistant}
+                    >
+                      <Sparkles className="h-4 w-4 text-slate-500" />
+                      {t("aiAssistant.title")}
+                    </DropdownMenuItem>
+                  ) : null}
+                </>
+              )}
               moreMenuItems={(
                 <>
                 <DropdownMenuItem
-                  className="flex h-9 w-full items-center gap-2 px-3 text-left text-sm text-slate-700 hover:bg-slate-50 cursor-pointer outline-none"
+                  className="flex h-9 w-full items-center gap-2 px-3 text-left text-xs text-slate-700 hover:bg-slate-50 cursor-pointer outline-none"
                   disabled={isLocalMemoId(memo.id)}
                   onClick={() => void handleCopyMemoId()}
                 >
@@ -3753,7 +3914,7 @@ const RichEditorPane = ({
                   {t(isLocalMemoId(memo.id) ? "editor.copyNoteIdAfterSync" : "editor.copyNoteId")}
                 </DropdownMenuItem>
                 <DropdownMenuItem
-                  className="flex h-9 w-full items-center gap-2 px-3 text-left text-sm text-slate-700 hover:bg-slate-50 cursor-pointer outline-none"
+                  className="flex h-9 w-full items-center gap-2 px-3 text-left text-xs text-slate-700 hover:bg-slate-50 cursor-pointer outline-none"
                   onClick={openNoteReplace}
                   disabled={effectiveReadOnly}
                 >
@@ -3761,7 +3922,7 @@ const RichEditorPane = ({
                   {t("editor.replaceCurrentMemo")}
                 </DropdownMenuItem>
                 <DropdownMenuItem
-                  className="flex h-9 w-full items-center gap-2 px-3 text-left text-sm text-slate-700 hover:bg-slate-50 cursor-pointer outline-none"
+                  className="flex h-9 w-full items-center gap-2 px-3 text-left text-xs text-slate-700 hover:bg-slate-50 cursor-pointer outline-none"
                   onClick={() => {
                     setHistoryOpen(true);
                   }}
@@ -3772,39 +3933,39 @@ const RichEditorPane = ({
                 {!readOnly && (
                   <DropdownMenuItem
                     className={cn(
-                      "flex h-9 w-full items-center gap-2 px-3 text-left text-sm hover:bg-slate-50 cursor-pointer outline-none",
-                      isMemoShared ? "bg-emerald-50 text-emerald-800" : "text-slate-700",
+                      "flex h-9 w-full items-center gap-2 px-3 text-left text-xs hover:bg-slate-50 cursor-pointer outline-none",
+                      isMemoShared ? "bg-workspace-selection text-slate-950" : "text-slate-700",
                     )}
                     disabled={isLocalMemoId(memo.id)}
                     onClick={() => setShareOpen(true)}
                   >
-                    <Share2 className={cn("h-4 w-4", isMemoShared ? "text-emerald-600" : "text-slate-500")} />
+                    <Share2 className={cn("h-4 w-4", isMemoShared ? "text-slate-950" : "text-slate-500")} />
                     {t(isLocalMemoId(memo.id) ? "sharing.afterSync" : isMemoShared ? "sharing.manage" : "sharing.action")}
                   </DropdownMenuItem>
                 )}
                 <DropdownMenuItem
-                  className="flex h-9 w-full items-center gap-2 px-3 text-left text-sm text-slate-700 hover:bg-slate-50 cursor-pointer outline-none"
+                  className="flex h-9 w-full items-center gap-2 px-3 text-left text-xs text-slate-700 hover:bg-slate-50 cursor-pointer outline-none"
                   onClick={handleExportMarkdown}
                 >
                   <FileDown className="h-4 w-4 text-slate-500" />
                   {t("editor.exportMarkdown")}
                 </DropdownMenuItem>
                 <DropdownMenuItem
-                  className="flex h-9 w-full items-center gap-2 px-3 text-left text-sm text-slate-700 hover:bg-slate-50 cursor-pointer outline-none"
+                  className="flex h-9 w-full items-center gap-2 px-3 text-left text-xs text-slate-700 hover:bg-slate-50 cursor-pointer outline-none"
                   onClick={() => void handleExportHtml()}
                 >
                   <FileCode2 className="h-4 w-4 text-slate-500" />
                   {t("editor.exportHtml")}
                 </DropdownMenuItem>
                 <DropdownMenuItem
-                  className="flex h-9 w-full items-center gap-2 px-3 text-left text-sm text-slate-700 hover:bg-slate-50 cursor-pointer outline-none"
+                  className="flex h-9 w-full items-center gap-2 px-3 text-left text-xs text-slate-700 hover:bg-slate-50 cursor-pointer outline-none"
                   onClick={() => handleExportPdf()}
                 >
                   <Printer className="h-4 w-4 text-slate-500" />
                   {t("editor.exportPdf")}
                 </DropdownMenuItem>
                 <DropdownMenuItem
-                  className="flex h-9 w-full items-center gap-2 px-3 text-left text-sm text-slate-700 hover:bg-slate-50 cursor-pointer outline-none"
+                  className="flex h-9 w-full items-center gap-2 px-3 text-left text-xs text-slate-700 hover:bg-slate-50 cursor-pointer outline-none"
                   onClick={handleOpenImageShare}
                 >
                   <ImageIcon className="h-4 w-4 text-slate-500" />
@@ -3813,7 +3974,7 @@ const RichEditorPane = ({
                 {readOnly ? (
                   <>
                     <DropdownMenuItem
-                      className="flex h-9 w-full items-center gap-2 px-3 text-left text-sm text-slate-700 hover:bg-slate-50 cursor-pointer outline-none"
+                      className="flex h-9 w-full items-center gap-2 px-3 text-left text-xs text-slate-700 hover:bg-slate-50 cursor-pointer outline-none"
                       onClick={() => void onRestored(memo.id)}
                     >
                       <RotateCcw className="h-4 w-4 text-slate-500" />
@@ -3821,7 +3982,7 @@ const RichEditorPane = ({
                     </DropdownMenuItem>
                     <DropdownMenuSeparator className="my-1 h-px bg-slate-100" />
                     <DropdownMenuItem
-                      className="flex h-9 w-full items-center gap-2 px-3 text-left text-sm text-rose-700 hover:bg-rose-50 cursor-pointer outline-none"
+                      className="flex h-9 w-full items-center gap-2 px-3 text-left text-xs text-rose-700 hover:bg-rose-50 cursor-pointer outline-none"
                       onClick={() => void onPermanentDeleted(memo.id)}
                     >
                       <Trash2 className="h-4 w-4" />
@@ -3831,7 +3992,7 @@ const RichEditorPane = ({
                 ) : (
                   <>
                     <DropdownMenuItem
-                      className="flex h-9 w-full items-center gap-2 px-3 text-left text-sm text-slate-700 hover:bg-slate-50 cursor-pointer outline-none"
+                      className="flex h-9 w-full items-center gap-2 px-3 text-left text-xs text-slate-700 hover:bg-slate-50 cursor-pointer outline-none"
                       onClick={handleSaveAsTemplate}
                       disabled={effectiveReadOnly}
                     >
@@ -3840,7 +4001,7 @@ const RichEditorPane = ({
                     </DropdownMenuItem>
                     <DropdownMenuSeparator className="my-1 h-px bg-slate-100" />
                     <DropdownMenuItem
-                      className="flex h-9 w-full items-center gap-2 px-3 text-left text-sm text-rose-700 hover:bg-rose-50 cursor-pointer outline-none"
+                      className="flex h-9 w-full items-center gap-2 px-3 text-left text-xs text-rose-700 hover:bg-rose-50 cursor-pointer outline-none"
                       onClick={() => void onDeleted(memo.id)}
                       disabled={effectiveReadOnly}
                     >
@@ -3852,62 +4013,10 @@ const RichEditorPane = ({
                 </>
               )}
             />
+            </div>
           </div>
         </div>
 
-        <div className={MEMO_EDITOR_TITLE_REGION_CLASS_NAME}>
-          <div className="min-w-0">
-            <MemoTitleInput
-              value={title}
-              readOnly={effectiveReadOnly}
-              onValueChange={(nextTitle) => {
-                setTitle(nextTitle);
-                persistCurrentDraft(nextTitle, tagsText, getMobilePlainTextValue());
-                markDirty();
-              }}
-              placeholder={t("common.untitledMemo")}
-            />
-          </div>
-          <MemoEditorMetadataRow
-            contentMarkdown={currentMarkdownForAi}
-            disabled={effectiveReadOnly}
-            mobileNotebookPickerOpen={mobileNotebookSheetOpen}
-            notebookOptions={notebookOptions}
-            notebookUpdatePending={notebookUpdatePending || saveMutation.isPending}
-            repository={repository}
-            selectedNotebookId={memo.notebookId}
-            tagsText={tagsText}
-            title={title}
-            onMobileNotebookPickerOpenChange={setMobileNotebookSheetOpen}
-            onNotebookChange={handleNotebookChange}
-            onTagsChange={(nextTagsText) => {
-              setTagsText(nextTagsText);
-              persistCurrentDraft(title, nextTagsText, getMobilePlainTextValue());
-              markDirty();
-            }}
-            trailingActions={(
-              <>
-                {!readOnly && (
-                  <IconTooltip label={`${t(desktopReadingProtection ? "editor.disableReadingProtection" : "editor.enableReadingProtection")} (${formatShortcutBinding(shortcutSettings.toggleReadingProtection)})`}>
-                    <Button
-                      className={cn(
-                        "hidden shrink-0 sm:inline-flex",
-                        desktopReadingProtection && "bg-slate-100 text-slate-700 ring-1 ring-inset ring-slate-300 hover:bg-slate-200 hover:text-slate-900"
-                      )}
-                      size="icon"
-                      variant={desktopReadingProtection ? "soft" : "ghost"}
-                      aria-label={`${t(desktopReadingProtection ? "editor.disableReadingProtection" : "editor.enableReadingProtection")} (${formatShortcutBinding(shortcutSettings.toggleReadingProtection)})`}
-                      aria-pressed={desktopReadingProtection}
-                      onClick={toggleDesktopReadingProtection}
-                    >
-                      {desktopReadingProtection ? <Lock className="h-4 w-4" /> : <LockOpen className="h-4 w-4" />}
-                    </Button>
-                  </IconTooltip>
-                )}
-              </>
-            )}
-          />
-        </div>
         {noteSearchOpen ? (
           <EditorNoteSearchBar
             inputRef={noteSearchInputRef}
@@ -3928,7 +4037,10 @@ const RichEditorPane = ({
           <EditorToolbar
             editor={editor}
             readOnly={effectiveReadOnly}
+            viewSwitchDisabled={readOnly}
             markdownMode={useMarkdownSourceEditor}
+            editorView={editorView}
+            onEditorViewChange={isMobileViewport ? undefined : selectEditorView}
             onMarkdownModeChange={handleMarkdownModeChange}
             markdownModeShortcut={shortcutSettings.toggleEditorMode}
             onPickAttachment={() => fileInputRef.current?.click()}
@@ -3953,45 +4065,15 @@ const RichEditorPane = ({
 
       <div
         ref={setEditorScrollContainerRef}
-        data-editor-theme={isNamedEditorTheme(editorTheme) ? editorTheme : "custom"}
-        data-paper-theme={isPaperEditorTheme(editorTheme) ? "true" : undefined}
-        data-publish-surface={isMobileViewport ? "phone" : "desktop"}
+        data-editor-theme="default"
+        data-note-palette={noteProse.palette}
         style={{
-          ...(isPaperEditorTheme(editorTheme)
-            ? publishEditorCssVars(
-                editorTheme,
-                resolvePaperEditorTheme(editorTheme)?.palette ?? "emerald",
-                isMobileViewport ? "phone" : "desktop",
-              )
-            : {
-                "--editor-body-font-size": `${MEMO_CONTENT_STYLE.body.fontSize}px`,
-                "--editor-body-line-height": String(MEMO_CONTENT_STYLE.body.lineHeight / MEMO_CONTENT_STYLE.body.fontSize),
-                "--editor-paragraph-spacing": `${MEMO_CONTENT_STYLE.body.paragraphSpacing}px`,
-              }),
+          ...noteProseCssVariables(noteProse),
           "--memo-content-divider-spacing": `${MEMO_CONTENT_STYLE.divider.marginVertical}px`,
-          ...(!isNamedEditorTheme(editorTheme)
-            ? {
-                "--editor-theme-light-bg": customEditorTheme.light.background,
-                "--editor-theme-light-text": customEditorTheme.light.text,
-                "--editor-theme-light-muted": customEditorTheme.light.muted,
-                "--editor-theme-light-heading": customEditorTheme.light.heading,
-                "--editor-theme-light-accent": customEditorTheme.light.accent,
-                "--editor-theme-light-soft": customEditorTheme.light.soft,
-                "--editor-theme-light-code-bg": customEditorTheme.light.codeBackground,
-                "--editor-theme-light-border": customEditorTheme.light.border,
-                "--editor-theme-dark-bg": customEditorTheme.dark.background,
-                "--editor-theme-dark-text": customEditorTheme.dark.text,
-                "--editor-theme-dark-muted": customEditorTheme.dark.muted,
-                "--editor-theme-dark-heading": customEditorTheme.dark.heading,
-                "--editor-theme-dark-accent": customEditorTheme.dark.accent,
-                "--editor-theme-dark-soft": customEditorTheme.dark.soft,
-                "--editor-theme-dark-code-bg": customEditorTheme.dark.codeBackground,
-                "--editor-theme-dark-border": customEditorTheme.dark.border,
-              }
-            : {}),
         } as CSSProperties}
         className={cn(
-          "edgeever-editor relative min-h-0 flex-1 bg-card",
+          "edgeever-editor relative min-h-0 flex-1 bg-transparent",
+          MEMO_EDITOR_READING_GUTTER_PROPERTIES_CLASS_NAME,
           useMobilePlainTextEditor
             ? "overflow-visible"
             : useMarkdownSourceEditor
@@ -4000,13 +4082,13 @@ const RichEditorPane = ({
               : "overflow-y-auto lg:[scrollbar-gutter:stable_both-edges]"
         )}
       >
-        {!isNamedEditorTheme(editorTheme) && customEditorTheme.customCss && (
+        {noteProse.customCss.trim() ? (
             <style
               data-theme-custom-css
-              data-original-css={customEditorTheme.customCss}
-              dangerouslySetInnerHTML={{ __html: sanitizeAndScopeCss(customEditorTheme.customCss) }}
+              data-original-css={noteProse.customCss}
+              dangerouslySetInnerHTML={{ __html: sanitizeAndScopeCss(noteProse.customCss) }}
             />
-          )}
+          ) : null}
         <div
           onClickCapture={
             !useMobilePlainTextEditor && !useMarkdownSourceEditor
@@ -4017,31 +4099,21 @@ const RichEditorPane = ({
             "flex gap-8 transition-all duration-200",
             useMarkdownSourceEditor
               ? "h-full min-h-0 flex-1 items-stretch px-0 py-0"
-              : "min-h-full items-start px-4 py-2 sm:px-7 lg:px-10",
+              : cn("min-h-full items-start py-2", MEMO_EDITOR_READING_GUTTER_CLASS_NAME),
             desktopFocusMode
               ? "mx-auto w-full max-w-[1400px] justify-center"
-              : editorContentAlignment === "center"
+              : isDesktopColumn
                 ? "w-full justify-center"
-                : "w-full justify-between"
+                : "w-full"
           )}
         >
           <div
             className={cn(
               "min-w-0 flex-1 transition-[max-width] duration-200",
               useMarkdownSourceEditor && "flex h-full min-h-0 flex-col",
-              desktopFocusMode
-                ? "max-w-[960px]"
-                : "max-w-none"
+              isDesktopColumn && "mx-auto",
             )}
-            style={
-              !desktopFocusMode && !useMarkdownSourceEditor && editorContentAlignment === "center"
-                ? {
-                    maxWidth: editorOutlineCollapsed
-                      ? EDITOR_CONTENT_MAX_WIDTH_COLLAPSED
-                      : EDITOR_CONTENT_MAX_WIDTH,
-                  }
-                : undefined
-            }
+            style={isDesktopColumn ? { maxWidth: contentColumnMaxWidth } : undefined}
           >
             {useMobilePlainTextEditor ? (
               <>
@@ -4061,11 +4133,17 @@ const RichEditorPane = ({
                   aria-label={t("editor.noteBodyAria")}
                   className="block min-h-[60dvh] w-full resize-none border border-slate-200 bg-card px-4 py-3 pr-32 text-base leading-7 text-slate-950 outline-none placeholder:text-slate-400 sm:px-7"
                   placeholder={t("editor.placeholder")}
-                  style={{ WebkitUserSelect: "text", userSelect: "text", caretColor: "auto" }}
+                  style={{
+                    WebkitUserSelect: "text",
+                    userSelect: "text",
+                    caretColor: "auto",
+                    fontSize: `${noteProse.fontSize}px`,
+                    lineHeight: String(noteProse.lineHeight),
+                  }}
                 />
                 <div className="absolute right-3 top-3 flex gap-2">
                   <button
-                    className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-sm font-semibold text-emerald-800 shadow-sm"
+                    className="rounded-full border border-slate-700 bg-slate-700 px-3 py-1.5 text-sm font-semibold text-slate-50 shadow-sm"
                     type="button"
                     onClick={() => void handleMobileClipboardInput()}
                   >
@@ -4085,8 +4163,10 @@ const RichEditorPane = ({
                 <Suspense fallback={<div className="h-full w-full" />}>
                   <MarkdownSourceEditor
                     ref={markdownSourceEditorRef}
+                    memoId={memo?.id ?? ""}
                     value={markdownSource}
                     onChange={handleMarkdownSourceChange}
+                    onPasteFiles={uploadMarkdownPasteFiles}
                     themeName={markdownTheme}
                     readOnly={effectiveReadOnly}
                     placeholder={`# ${t("editor.placeholder")}`}
@@ -4136,6 +4216,7 @@ const RichEditorPane = ({
               editor={editor}
               title={getEditableMemoTitle(memo?.title)}
               scrollContainer={editorScrollContainer}
+              noteProse={noteProse}
             />
           )}
           {!isMobileViewport && !useMobilePlainTextEditor && !useMarkdownSourceEditor && !phonePreviewOpen && (
@@ -4209,6 +4290,12 @@ const RichEditorPane = ({
       {memoIdCopyNotice && (
         <ClipboardCopyNotice status={memoIdCopyNotice.status}>
           {t(memoIdCopyNotice.status === "copied" ? "editor.noteIdCopied" : "editor.noteIdCopyFailed", { id: memoIdCopyNotice.id })}
+        </ClipboardCopyNotice>
+      )}
+
+      {(wechatCopyState === "copied" || wechatCopyState === "error") && (
+        <ClipboardCopyNotice status={wechatCopyState === "copied" ? "copied" : "error"}>
+          {t(wechatCopyState === "copied" ? "editor.copiedToWeChat" : "editor.copyToWeChatFailed")}
         </ClipboardCopyNotice>
       )}
 

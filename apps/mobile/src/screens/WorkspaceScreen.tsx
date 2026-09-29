@@ -30,7 +30,7 @@ import {
   type MobileLocalePreference,
   type MobileMemoListDensity,
 } from "../lib/preferences";
-import { useMobileLocale } from "../lib/mobile-locale";
+import { localizeUntitledMemoTitle, localizeMissingNotebookName, useMobileLocale } from "../lib/mobile-locale";
 import { useSession } from "../lib/session";
 import {
   clearMobileMemoUpdateQueueItem,
@@ -969,9 +969,10 @@ export const WorkspaceScreen = ({
 
       const response = await client.createMemoShare(memo.id);
       const shareUrl = `${session.baseUrl.replace(/\/+$/, "")}/share/${encodeURIComponent(response.share.token)}`;
+      const shareTitle = localizeUntitledMemoTitle(memo.title, resolvedLocale);
       await NativeShare.share({
-        message: `${memo.title?.trim() || DEFAULT_MEMO_TITLE}\n${shareUrl}`,
-        title: memo.title?.trim() || DEFAULT_MEMO_TITLE,
+        message: `${shareTitle}\n${shareUrl}`,
+        title: shareTitle,
         url: shareUrl,
       });
     },
@@ -1277,7 +1278,7 @@ export const WorkspaceScreen = ({
         isSaving={updateMemoMutation.isPending || localUpdateMemoMutation.isPending}
         isSharing={shareMemoMutation.isPending}
         memo={selectedMemo}
-        notebookName={notebooks.find((notebook) => notebook.id === selectedMemo?.notebookId)?.name ?? "未分类"}
+        notebookName={notebooks.find((notebook) => notebook.id === selectedMemo?.notebookId)?.name ?? localizeMissingNotebookName(resolvedLocale)}
         notebooks={notebooks}
         onClose={closeDetail}
         onCloseEditor={closeRichEditor}
@@ -1452,13 +1453,13 @@ export const WorkspaceScreen = ({
         />
       ) : null}
 
-      {activeView !== "settings" && !selectionMode ? (
+      {!selectionMode ? (
         <View
           style={[styles.bottomNav, { height: MOBILE_UI_METRICS.bottomNavigationHeight + safeAreaInsets.bottom, paddingBottom: safeAreaInsets.bottom }]}
         >
         <BottomNavItem
           active={activeView === "notes"}
-          icon={<Home color={activeView === "notes" ? "#0f172a" : "#64748b"} size={20} />}
+          icon={<Home color={activeView === "notes" ? styles.bottomNavIconActive.color : styles.bottomNavText.color} size={20} />}
           label="首页"
           onPress={showAllNotes}
         />
@@ -1479,9 +1480,9 @@ export const WorkspaceScreen = ({
           <Plus color={canCreateMemo ? "#ffffff" : "#e2e8f0"} size={28} />
         </Pressable>
         <BottomNavItem
-          active={false}
+          active={activeView === "settings"}
           badge={hasUpdate}
-          icon={<UserRound color="#64748b" size={20} />}
+          icon={<UserRound color={activeView === "settings" ? styles.bottomNavIconActive.color : styles.bottomNavText.color} size={20} />}
           label="我的"
           onPress={openSettings}
         />
@@ -1499,6 +1500,7 @@ const BottomNavItem = ({ active = false, badge = false, icon, label, onPress }: 
     onPress={onPress}
     style={styles.bottomNavItem}
   >
+    {active ? <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={styles.bottomNavActiveIndicator} /> : null}
     <View style={styles.bottomNavIcon}>
       {icon}
       {badge ? <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={styles.bottomNavBadge} /> : null}

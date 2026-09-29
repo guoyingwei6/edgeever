@@ -81,7 +81,7 @@ describe("dark theme contracts", () => {
     const css = readFileSync(new URL("../styles/globals.css", import.meta.url), "utf8");
 
     expect(css).toContain("html.dark[data-edgeever-environment=\"local\"] body::after");
-    expect(css).toContain("--tooltip-bg: #252c28;");
+    expect(css).toContain("--tooltip-bg: #2c3330;");
     expect(css).toContain("--scrollbar-thumb: rgb(137 150 142 / 0.38);");
     expect(css).toContain("--search-match: rgb(22 160 110 / 0.32);");
     expect(css).toContain(":root.dark .ProseMirror .edgeever-mermaid-preview");
@@ -116,7 +116,9 @@ describe("dark theme contracts", () => {
     const editorPane = readFileSync(new URL("../components/EditorPane.tsx", import.meta.url), "utf8");
     const editorThemeCss = readFileSync(new URL("../styles/editor-themes/base.css", import.meta.url), "utf8");
 
-    expect(editorPane).toContain("useEditorTheme()");
+    expect(editorPane).toContain('data-editor-theme="default"');
+    expect(editorPane).toContain("noteProseCssVariables(noteProse)");
+    expect(editorPane).not.toContain("useEditorTheme()");
     expect(editorPane).not.toContain("resolvedTheme");
     expect(editorThemeCss).toContain(':root.dark .edgeever-editor[data-editor-theme="custom"]:not([data-editor-theme="default"])');
     expect(editorThemeCss).toContain("--editor-theme-dark-bg");

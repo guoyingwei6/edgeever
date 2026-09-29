@@ -5,7 +5,6 @@ import { Editor } from "@tiptap/core";
 import Image from "@tiptap/extension-image";
 import Placeholder from "@tiptap/extension-placeholder";
 import CodeBlock from "@tiptap/extension-code-block";
-import { EdgeEverLink } from "@edgeever/shared/editor-link";
 import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import { NodeSelection } from "@tiptap/pm/state";
 import mermaid from "mermaid";
@@ -30,6 +29,7 @@ import {
   type TiptapDoc,
   type DiagramDocument,
 } from "@edgeever/shared";
+import { clearMobileEditorUndoHistory } from "@edgeever/shared/mobile-editor";
 import {
   type NoteImageTheme,
   type NoteImageFontStyle,
@@ -46,10 +46,12 @@ import {
 import { createEdgeEverMathematics } from "@edgeever/shared/mathematics";
 import { createIosImageGallery } from "./document-nodes";
 import { createImageInsertTransaction, groupUploadedImages, NATIVE_IMAGE_GALLERY_CSS } from "@edgeever/shared/native-image-gallery";
+import { installPhoneImageFillStyle, NEW_IMAGE_WIDTH_PERCENT } from "@edgeever/shared/image-display";
 
 const galleryStyle = document.createElement("style");
 galleryStyle.textContent = NATIVE_IMAGE_GALLERY_CSS;
 document.head.append(galleryStyle);
+installPhoneImageFillStyle();
 
 const detailsStyle = document.createElement("style");
 detailsStyle.textContent = DETAILS_EDITOR_CSS;
@@ -759,7 +761,6 @@ function buildExtensions(placeholder: string) {
       table: { table: { resizable: false } },
       markdown: true,
     }),
-    EdgeEverLink,
     NativeAttachmentMetadata,
     CodeBlock.configure({
       languageClassPrefix: "language-",
@@ -1116,6 +1117,8 @@ function setToolbarVisible(visible: boolean) {
   toolbarEl.innerHTML = "";
   if (!visible) return;
   const actions: Array<{ id: string; label: string; run: () => void }> = [
+    { id: "undo", label: "↩", run: () => editor.chain().focus().undo().run() },
+    { id: "redo", label: "↪", run: () => editor.chain().focus().redo().run() },
     {
       id: "image",
       label: "▧+",
@@ -1159,6 +1162,8 @@ function setToolbarVisible(visible: boolean) {
     btn.textContent = action.label;
     btn.dataset.action = action.id;
     const labels: Record<string, [string, string]> = {
+      undo: ["撤销", "Undo"],
+      redo: ["重做", "Redo"],
       image: ["插入图片", "Insert image"],
       bold: ["粗体", "Bold"],
       bullet: ["项目符号列表", "Bullet list"],
@@ -1186,8 +1191,21 @@ function refreshToolbarState() {
     task: editor.isActive("taskList"),
     quote: editor.isActive("blockquote"),
   };
+  const historyEnabled = (command: "undo" | "redo") => {
+    try {
+      return editor.can().chain().focus()[command]().run();
+    } catch {
+      return false;
+    }
+  };
+  const enabled: Record<string, boolean> = {
+    undo: historyEnabled("undo"),
+    redo: historyEnabled("redo"),
+  };
   toolbarEl.querySelectorAll<HTMLButtonElement>("button[data-action]").forEach((button) => {
-    button.classList.toggle("is-active", active[button.dataset.action ?? ""] ?? false);
+    const actionId = button.dataset.action ?? "";
+    button.classList.toggle("is-active", active[actionId] ?? false);
+    if (actionId in enabled) button.disabled = !enabled[actionId];
   });
 }
 
@@ -1393,6 +1411,8 @@ const api: EdgeEverEditorAPI = {
     // Keep editability. Do NOT focus("end") here — native re-pushes content on SwiftUI
     // updates while typing; focusing would yank the caret to the document bottom mid-edit.
     editor.setEditable(mode === "editor");
+    clearMobileEditorUndoHistory(editor);
+    refreshToolbarState();
     suppressChange = false;
     void afterContentSet((document.documentElement.dataset.theme as "light" | "dark") || "light");
   },
@@ -1411,6 +1431,8 @@ const api: EdgeEverEditorAPI = {
       editor.commands.setContent({ type: "doc", content: [{ type: "paragraph" }] });
     }
     editor.setEditable(mode === "editor");
+    clearMobileEditorUndoHistory(editor);
+    refreshToolbarState();
     suppressChange = false;
     void afterContentSet((document.documentElement.dataset.theme as "light" | "dark") || "light");
   },
@@ -1525,7 +1547,7 @@ const api: EdgeEverEditorAPI = {
     editor
       .chain()
       .focus()
-      .setImage({ src: previewDataUrl, alt: uploadId })
+      .setImage({ src: previewDataUrl, alt: uploadId, width: NEW_IMAGE_WIDTH_PERCENT })
       .run();
     // mark last image
     const imgs = editorEl.querySelectorAll("img");
@@ -1538,6 +1560,7 @@ const api: EdgeEverEditorAPI = {
     if (!editor.isEditable) return;
     editor.view.dispatch(createImageInsertTransaction(editor.state, {
       src: imageUrl, alt: alt || uploadId || "",
+      width: NEW_IMAGE_WIDTH_PERCENT,
     }));
     emitChange(editor);
   },
