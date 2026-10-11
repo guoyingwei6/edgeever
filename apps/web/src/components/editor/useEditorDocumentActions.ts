@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { Editor } from "@tiptap/react";
 import { docToMarkdown, markdownToDoc, type MemoDetail, type TiptapDoc } from "@edgeever/shared";
 import type { MemoDocumentActionRequest } from "@/lib/app-helpers";
-import { downloadMarkdownFile } from "@/lib/note-markdown-export";
+import { buildSingleNoteMarkdown, downloadMarkdownFile } from "@/lib/note-markdown-export";
 import { downloadNoteHtmlFile, getHtmlImageEmbedNoticeKind } from "@/lib/note-html-export";
 import { NOTE_HTML_FULL_STYLES } from "@/lib/note-html-export-assets";
 import { openNotePrintPreview, serializeNoteDocumentForPrint } from "@/lib/note-print";
@@ -54,6 +54,14 @@ export const useEditorDocumentActions = ({
   const [imageShareOpen, setImageShareOpen] = useState(false);
   const [imageShareSource, setImageShareSource] = useState<ShareNoteImageSource | null>(null);
   const [wechatCopyState, setWechatCopyState] = useState<WechatCopyState>("idle");
+  const wechatCopyPendingRef = useRef(false);
+  const wechatCopyResetTimerRef = useRef<number | null>(null);
+
+  useEffect(() => () => {
+    if (wechatCopyResetTimerRef.current !== null) {
+      window.clearTimeout(wechatCopyResetTimerRef.current);
+    }
+  }, []);
 
   const resolveExportContent = useCallback(
     () => resolveEditorExportContent({
@@ -67,10 +75,14 @@ export const useEditorDocumentActions = ({
   );
 
   const handleCopyToWeChat = useCallback(async () => {
-    if (!isEditorReady(editor)) {
+    if (!isEditorReady(editor) || wechatCopyPendingRef.current) {
       return;
     }
 
+    wechatCopyPendingRef.current = true;
+    if (wechatCopyResetTimerRef.current !== null) {
+      window.clearTimeout(wechatCopyResetTimerRef.current);
+    }
     setWechatCopyState("copying");
     try {
       if (useMarkdownSourceEditor) {
@@ -79,10 +91,12 @@ export const useEditorDocumentActions = ({
         await copyEditorToWeChat(editor);
       }
       setWechatCopyState("copied");
-      window.setTimeout(() => setWechatCopyState("idle"), 2200);
+      wechatCopyResetTimerRef.current = window.setTimeout(() => setWechatCopyState("idle"), 2200);
     } catch {
       setWechatCopyState("error");
-      window.setTimeout(() => setWechatCopyState("idle"), 2600);
+      wechatCopyResetTimerRef.current = window.setTimeout(() => setWechatCopyState("idle"), 2600);
+    } finally {
+      wechatCopyPendingRef.current = false;
     }
   }, [editor, markdownSource, useMarkdownSourceEditor]);
 
@@ -128,8 +142,8 @@ export const useEditorDocumentActions = ({
       return;
     }
 
-    downloadMarkdownFile(content.markdown, title, t("common.untitledMemo"));
-  }, [memo, resolveExportContent, t, title]);
+    downloadMarkdownFile(buildSingleNoteMarkdown(content.markdown, title, parseTagsText(tagsText)), title, t("common.untitledMemo"));
+  }, [memo, notebookName, resolveExportContent, t, tagsText, title]);
 
   const handleExportHtml = useCallback(async () => {
     const content = resolveExportContent();
@@ -237,6 +251,7 @@ export const useEditorDocumentActions = ({
           if (canShareMemo) setShareOpen(true);
         },
         shareImage: handleOpenImageShare,
+        copyWeChat: () => void handleCopyToWeChat(),
       },
       documentActionRequest.printWindow,
     );
@@ -244,6 +259,7 @@ export const useEditorDocumentActions = ({
     canShareMemo,
     documentActionRequest,
     editor,
+    handleCopyToWeChat,
     handleExportHtml,
     handleExportMarkdown,
     handleExportPdf,

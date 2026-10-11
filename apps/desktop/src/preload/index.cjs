@@ -30,6 +30,9 @@ contextBridge.exposeInMainWorld("edgeeverDesktop", Object.freeze({
   recoveredAfterAbnormalExit: ipcRenderer.sendSync("desktop:recovered-after-abnormal-exit-sync"),
   sidecarStatus: () => ipcRenderer.invoke("desktop:sidecar-status"),
   systemInfo: () => ipcRenderer.invoke("desktop:system-info"),
+  globalShortcut: () => ipcRenderer.invoke("desktop:global-shortcut"),
+  setGlobalShortcut: (binding) => ipcRenderer.invoke("desktop:set-global-shortcut", binding),
+  captureGlobalShortcut: (capturing) => ipcRenderer.invoke("desktop:capture-global-shortcut", capturing),
   setAccountScope: (accountId) => ipcRenderer.invoke("desktop:set-account-scope", accountId),
   apiBaseUrl: ipcRenderer.sendSync("desktop:api-base-url-sync"),
   setApiBaseUrl: (value) => ipcRenderer.invoke("desktop:set-api-base-url", value),
@@ -47,6 +50,17 @@ contextBridge.exposeInMainWorld("edgeeverDesktop", Object.freeze({
     const listener = (_event, requestId, chunk) => callback(requestId, chunk);
     ipcRenderer.on("desktop:ai-direct-chunk", listener);
     return () => ipcRenderer.removeListener("desktop:ai-direct-chunk", listener);
+  },
+  listAcpAdapters: () => ipcRenderer.invoke("desktop:acp-list"),
+  probeAcpAdapter: (input) => ipcRenderer.invoke("desktop:acp-probe", input),
+  installAcpAdapter: (id) => ipcRenderer.invoke("desktop:acp-install", id),
+  authenticateAcpAdapter: (input) => ipcRenderer.invoke("desktop:acp-authenticate", input),
+  promptAcp: (input) => ipcRenderer.invoke("desktop:acp-prompt", input),
+  cancelAcp: (requestId) => ipcRenderer.invoke("desktop:acp-cancel", requestId),
+  onAcpEvent: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on("desktop:acp-event", listener);
+    return () => ipcRenderer.removeListener("desktop:acp-event", listener);
   },
   clearLocalData: () => ipcRenderer.invoke("desktop:clear-local-data"),
   recordRendererError: (details) => ipcRenderer.invoke("desktop:record-renderer-error", details),

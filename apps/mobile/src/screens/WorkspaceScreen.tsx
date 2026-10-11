@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient, type InfiniteData, type QueryKey } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient, type InfiniteData, type QueryKey } from "@tanstack/react-query";
 import * as Clipboard from "expo-clipboard";
 import type { ListMemosResponse, MemoFilterMode, MemoSortMode } from "@edgeever/client";
 import {
@@ -19,13 +19,15 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { Alert, Pressable, Text } from "../components/LocalizedText";
 import { ApiRequestError } from "@edgeever/client";
-import { DEFAULT_MEMO_TITLE, getNotebookDescendantIds, hasDiagramDocumentMarker, markdownToDoc, type MemoDetail } from "@edgeever/shared";
+import { DEFAULT_MEMO_TITLE, getNotebookScopeIds, hasDiagramDocumentMarker, markdownToDoc, type MemoDetail, type MemoSummary, type Notebook } from "@edgeever/shared";
 import { MOBILE_UI_METRICS, toggleMobileMemoFilterMode } from "@edgeever/shared/mobile-ui";
 import { clearMobileMemoDraft, readMobileMemoDraft, type MobileMemoDraft } from "../lib/mobile-drafts";
 import {
   readMobileImageCompressionEnabled,
+  readMobileShowDescendantNotes,
   readMobileMemoListDensity,
   writeMobileImageCompressionEnabled,
+  saveMobileShowDescendantNotes,
   writeMobileMemoListDensity,
   type MobileLocalePreference,
   type MobileMemoListDensity,
@@ -53,6 +55,7 @@ import {
   getLocalMemo,
   listLocalMemos,
   listLocalNotebooks,
+  upsertLocalNotebook,
   listLocalTags,
   resolveLocalMemo,
   syncMobileLocalMirror,
@@ -93,6 +96,7 @@ import {
   applyOptimisticMemoToCache,
   createOptimisticMemo,
   findCachedMemoDetail,
+  memoQueriesShareScope,
   type MobileMemoUpdatePayload,
 } from "./workspace-memo-cache";
 import { refreshWorkspaceThemeStyles, styles } from "./workspace-styles";
@@ -140,7 +144,7 @@ export const WorkspaceScreen = ({
   onIncomingShareHandled?: () => void;
 }) => {
   const { resolvedTheme } = useMobileTheme();
-  const { preference: localePreference, resolvedLocale, setPreference: setLocalePreference } = useMobileLocale();
+  const { preference: localePreference, resolvedLocale, setPreference: setLocalePreference, translate } = useMobileLocale();
   const hasUpdate = useMobileUpdateAvailable();
   refreshWorkspaceThemeStyles(resolvedTheme);
   const { client, session, signOut } = useSession();
@@ -157,7 +161,11 @@ export const WorkspaceScreen = ({
   const [memoSortMode, setMemoSortMode] = useState<MemoSortMode>("updated-desc");
   const [memoListDensity, setMemoListDensity] = useState<MobileMemoListDensity>("preview");
   const [imageCompressionEnabled, setImageCompressionEnabled] = useState(true);
+  // Null until the stored value loads, so lists never flash the wrong notebook scope.
+  const [showDescendantNotes, setShowDescendantNotes] = useState<boolean | null>(null);
+  const [showDescendantNotesSaveFailed, setShowDescendantNotesSaveFailed] = useState(false);
   const [selectedMemoId, setSelectedMemoId] = useState<string | null>(null);
+  const [imageShareFromList, setImageShareFromList] = useState(false);
   const [searchText, setSearchText] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
   const [createSeed, setCreateSeed] = useState<MobileCreateMemoSeed | null>(null);
@@ -250,13 +258,14 @@ export const WorkspaceScreen = ({
   }, [activeNotebookId, localePreference, notebooks, selectedTag]);
 
   const activeNotebook = notebooks.find((notebook) => notebook.id === activeNotebookId) ?? null;
-  const activeNotebookDescendantIds = useMemo(
-    () => (activeNotebookId === ALL_NOTES_ID || selectedTag ? [] : getNotebookDescendantIds(notebooks, activeNotebookId)),
-    [activeNotebookId, notebooks, selectedTag]
+  const activeNotebookScopeIds = useMemo(
+    () => (activeNotebookId === ALL_NOTES_ID || selectedTag ? [] : getNotebookScopeIds(notebooks, activeNotebookId, showDescendantNotes ?? true)),
+    [activeNotebookId, notebooks, selectedTag, showDescendantNotes]
   );
 
+  const memosQueryKey = ["mobile", "memos", memoView, activeNotebookId, memoFilterMode, memoSortMode, activeNotebookScopeIds, selectedTag, "paged-v3"] as const;
   const memosQuery = useInfiniteQuery({
-    queryKey: ["mobile", "memos", memoView, activeNotebookId, memoFilterMode, memoSortMode, activeNotebookDescendantIds, selectedTag, "paged-v3"],
+    queryKey: memosQueryKey,
     initialPageParam: 0,
     queryFn: async ({ pageParam }) => {
       if (!client) {
@@ -264,7 +273,7 @@ export const WorkspaceScreen = ({
       }
 
       return listLocalMemos(dataScope, {
-        notebookIds: activeNotebookDescendantIds,
+        notebookIds: activeNotebookScopeIds,
         filter: memoFilterMode,
         tag: memoView === "notebook" ? selectedTag ?? undefined : undefined,
         limit: 50,
@@ -274,12 +283,14 @@ export const WorkspaceScreen = ({
       });
     },
     getNextPageParam: (lastPage) => lastPage.nextCursor ? Number(lastPage.nextCursor) : undefined,
-    enabled: Boolean(client),
-    placeholderData: keepPreviousData,
+    enabled: Boolean(client) && showDescendantNotes !== null,
+    placeholderData: (previousData, previousQuery) =>
+      previousQuery && memoQueriesShareScope("memos", previousQuery.queryKey, memosQueryKey) ? previousData : undefined,
   });
 
+  const searchQueryKey = ["mobile", "search", memoView, debouncedSearchText, activeNotebookId, memoFilterMode, memoSortMode, activeNotebookScopeIds, selectedTag, "paged-v5"] as const;
   const searchQuery = useInfiniteQuery({
-    queryKey: ["mobile", "search", memoView, debouncedSearchText, activeNotebookId, memoFilterMode, memoSortMode, activeNotebookDescendantIds, selectedTag, "paged-v5"],
+    queryKey: searchQueryKey,
     initialPageParam: 0,
     queryFn: async ({ pageParam }) => {
       if (!client) {
@@ -288,7 +299,7 @@ export const WorkspaceScreen = ({
 
       return listLocalMemos(dataScope, {
         q: debouncedSearchText,
-        notebookIds: activeNotebookDescendantIds,
+        notebookIds: activeNotebookScopeIds,
         filter: memoFilterMode,
         tag: memoView === "notebook" ? selectedTag ?? undefined : undefined,
         limit: 50,
@@ -298,8 +309,9 @@ export const WorkspaceScreen = ({
       });
     },
     getNextPageParam: (lastPage) => lastPage.nextCursor ? Number(lastPage.nextCursor) : undefined,
-    enabled: Boolean(client && debouncedSearchText.length > 0),
-    placeholderData: keepPreviousData,
+    enabled: Boolean(client && debouncedSearchText.length > 0) && showDescendantNotes !== null,
+    placeholderData: (previousData, previousQuery) =>
+      previousQuery && memoQueriesShareScope("search", previousQuery.queryKey, searchQueryKey) ? previousData : undefined,
   });
 
   const memoDetailQuery = useQuery({
@@ -390,6 +402,7 @@ export const WorkspaceScreen = ({
       return;
     }
 
+    setImageShareFromList(false);
     setSelectedMemoId(memoId);
   };
 
@@ -438,6 +451,7 @@ export const WorkspaceScreen = ({
 
   const closeDetail = () => {
     setSelectedMemoId(null);
+    setImageShareFromList(false);
   };
 
   const closeRichEditor = () => {
@@ -467,7 +481,7 @@ export const WorkspaceScreen = ({
     if (hasDiagramDocumentMarker(memo.contentMarkdown)) {
       Alert.alert(
         resolvedLocale !== "zh-CN" ? "View-only diagram" : "图表暂为只读",
-        resolvedLocale === "en-US"
+        resolvedLocale !== "zh-CN"
           ? "Visual diagram editing is currently available on Web and desktop."
           : "可视化图表目前请在 Web 或桌面端编辑。"
       );
@@ -550,35 +564,44 @@ export const WorkspaceScreen = ({
   const handleRenderedClipCaptured = useCallback((page: MobileRenderedWebPage) => {
     if (!incomingClipCaptureUrl) return;
     openIncomingClipDraft(
-      buildMobileWebClipDraftFromRenderedPage(incomingClipCaptureUrl, page),
+      buildMobileWebClipDraftFromRenderedPage(incomingClipCaptureUrl, page, { locale: resolvedLocale }),
     );
     finishIncomingShare();
-  }, [finishIncomingShare, incomingClipCaptureUrl, openIncomingClipDraft]);
+  }, [finishIncomingShare, incomingClipCaptureUrl, openIncomingClipDraft, resolvedLocale]);
 
   const handleRenderedClipFailed = useCallback((message: string) => {
     const sourceUrl = incomingClipCaptureUrl;
     if (!sourceUrl) return;
     setIncomingClipCaptureUrl(null);
-    void buildMobileWebClipDraft(sourceUrl)
+    void buildMobileWebClipDraft(sourceUrl, { locale: resolvedLocale })
       .then((draft) => {
         openIncomingClipDraft(draft);
         Alert.alert(
           "正文剪藏失败",
-          `${message} 已保留文章链接，你可以稍后重新分享重试。`,
+          `${translate(message)} ${translate("已保留文章链接，你可以稍后重新分享重试。")}`,
         );
       })
       .finally(finishIncomingShare);
-  }, [finishIncomingShare, incomingClipCaptureUrl, openIncomingClipDraft]);
+  }, [finishIncomingShare, incomingClipCaptureUrl, openIncomingClipDraft, resolvedLocale, translate]);
 
   useEffect(() => {
     if (incomingShareIsResolving) {
       return;
     }
 
+    if (incomingShareError && incomingSharePayloads.length === 0) {
+      if (processedShareUrlRef.current !== "invalid-share-resolution") {
+        processedShareUrlRef.current = "invalid-share-resolution";
+        Alert.alert(translate("无法读取分享内容"), translate("请重新分享后再试。"));
+        onIncomingShareHandledRef.current?.();
+      }
+      return;
+    }
+
     if (incomingShareError && sharedImages.some((image) => !image.uri.startsWith("file:"))) {
       if (processedShareUrlRef.current !== "invalid-binary-share") {
         processedShareUrlRef.current = "invalid-binary-share";
-        Alert.alert("无法读取分享图片", incomingShareError.message || "请重新分享后再试。");
+        Alert.alert(translate("无法读取分享图片"), translate("请重新分享后再试。"));
         onIncomingShareHandledRef.current?.();
       }
       return;
@@ -606,7 +629,7 @@ export const WorkspaceScreen = ({
       setCreateSeed({
         contentMarkdown: "",
         tagsText: "",
-        title: sharedImages.length === 1 ? "分享的图片" : `分享的图片（${sharedImages.length} 张）`,
+        title: translate(sharedImages.length === 1 ? "分享的图片" : `分享的图片（${sharedImages.length} 张）`),
       });
       setActiveView("notes");
       setMemoView("notebook");
@@ -650,7 +673,7 @@ export const WorkspaceScreen = ({
         active = false;
       };
     }
-    void buildMobileWebClipDraft(sourceUrl)
+    void buildMobileWebClipDraft(sourceUrl, { locale: resolvedLocale })
       .then((draft) => {
         if (!active) {
           return;
@@ -680,7 +703,9 @@ export const WorkspaceScreen = ({
     notebooks.length,
     notebooksQuery.isSuccess,
     openIncomingClipDraft,
+    resolvedLocale,
     sharedImages,
+    translate,
   ]);
 
   useEffect(() => {
@@ -723,6 +748,11 @@ export const WorkspaceScreen = ({
         setImageCompressionEnabled(enabled);
       }
     });
+    readMobileShowDescendantNotes().then((enabled) => {
+      if (mounted) {
+        setShowDescendantNotes(enabled);
+      }
+    });
 
     return () => {
       mounted = false;
@@ -755,6 +785,12 @@ export const WorkspaceScreen = ({
   const handleImageCompressionChange = (enabled: boolean) => {
     setImageCompressionEnabled(enabled);
     void writeMobileImageCompressionEnabled(enabled);
+  };
+
+  const handleShowDescendantNotesChange = async (enabled: boolean) => {
+    const result = await saveMobileShowDescendantNotes(enabled);
+    setShowDescendantNotes(result.value);
+    setShowDescendantNotesSaveFailed(!result.saved);
   };
 
   const optimisticallyRemoveMemoIds = async (memoIds: string[]): Promise<MobileMemoListCacheSnapshot> => {
@@ -962,7 +998,7 @@ export const WorkspaceScreen = ({
   });
 
   const shareMemoMutation = useMutation({
-    mutationFn: async (memo: MemoDetail) => {
+    mutationFn: async (memo: Pick<MemoSummary, "id" | "title">) => {
       if (!client || !session) {
         throw new Error("Client is not ready");
       }
@@ -1208,6 +1244,7 @@ export const WorkspaceScreen = ({
       {activeView === "notes" ? (
         <NotesView
           activeNotebook={activeNotebook}
+          showDescendantNotes={showDescendantNotes ?? true}
           initialSyncProgress={initialMirrorSyncProgress}
           isLoading={notebooksQuery.isLoading || (searchActive ? searchQuery.isLoading : memosQuery.isLoading) || (isInitialMirrorStatusPending && visibleMemos.length === 0)}
           isLoadingMore={searchActive ? searchQuery.isFetchingNextPage : memosQuery.isFetchingNextPage}
@@ -1264,6 +1301,9 @@ export const WorkspaceScreen = ({
           onLocalePreferenceChange={handleLocalePreferenceChange}
           imageCompressionEnabled={imageCompressionEnabled}
           onImageCompressionChange={handleImageCompressionChange}
+          showDescendantNotes={showDescendantNotes ?? true}
+          showDescendantNotesSaveFailed={showDescendantNotesSaveFailed}
+          onShowDescendantNotesChange={(enabled) => void handleShowDescendantNotesChange(enabled)}
           onSignOut={signOut}
         />
       ) : null}
@@ -1271,6 +1311,7 @@ export const WorkspaceScreen = ({
       <MemoDetailModal
         editingSession={richEditingSession}
         imageCompressionEnabled={imageCompressionEnabled}
+        imageShareFromList={imageShareFromList}
         initialSearchQuery={selectedMemoId ? searchText.trim() : ""}
         isDeleting={deleteMemoMutation.isPending}
         isLoading={memoDetailQuery.isLoading}
@@ -1306,6 +1347,25 @@ export const WorkspaceScreen = ({
         activeNotebookId={activeNotebookId}
         notebooks={notebooks}
         onClose={() => setNotebookPickerOpen(false)}
+        onCreate={async (name, parentId) => {
+          if (!client) {
+            throw new Error("连接尚未就绪");
+          }
+          const { notebook } = await client.createNotebook({ name, parentId });
+          queryClient.setQueryData<{ notebooks: Notebook[] }>(["mobile", "notebooks"], (current) => ({
+            notebooks: [...(current?.notebooks ?? []).filter((item) => item.id !== notebook.id), notebook],
+          }));
+          try {
+            await upsertLocalNotebook(dataScope, notebook);
+            void queryClient.invalidateQueries({ queryKey: ["mobile", "notebooks"] });
+          } catch {
+            Alert.alert("笔记本已创建", "本机缓存更新失败，正在重新同步。", [{ text: "好的" }]);
+            void syncMobileLocalMirror(client, dataScope)
+              .then(() => queryClient.invalidateQueries({ queryKey: ["mobile", "notebooks"] }))
+              .catch(() => undefined);
+          }
+          return notebook.id;
+        }}
         onSelect={(notebookId) => {
           setSelectedTag(null);
           setActiveNotebookId(notebookId);
@@ -1423,12 +1483,27 @@ export const WorkspaceScreen = ({
       {selectionMoreOpen ? <SelectionMoreModal
         bottomOffset={58 + safeAreaInsets.bottom}
         canPin={memoView !== "trash" && selectedMemoIds.size > 0 && !pinMemosMutation.isPending}
+        canShare={memoView !== "trash" && selectedMemoIds.size === 1 && selectedMemos.length === 1 && !selectedMemos[0]?.isDeleted && !shareMemoMutation.isPending}
         canToggleVisibleSelection={canToggleVisibleSelection}
         onClear={clearSelection}
         onClose={() => setSelectionMoreOpen(false)}
         onPin={() => {
           setSelectionMoreOpen(false);
           pinMemosMutation.mutate({ memoIds: selectedMemoIdList, isPinned: nextSelectionPinValue });
+        }}
+        onShare={() => {
+          const memo = selectedMemos[0];
+          if (!memo) return;
+          setSelectionMoreOpen(false);
+          shareMemoMutation.mutate(memo);
+        }}
+        onShareImage={() => {
+          const memo = selectedMemos[0];
+          if (!memo) return;
+          setSelectionMoreOpen(false);
+          clearSelection();
+          setImageShareFromList(true);
+          setSelectedMemoId(memo.id);
         }}
         onToggleVisibleSelection={() => {
           setSelectionMoreOpen(false);

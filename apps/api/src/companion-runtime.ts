@@ -1,15 +1,17 @@
-import { isStepCount, jsonSchema, tool, ToolLoopAgent, type LanguageModel } from "ai";
+import { isStepCount, jsonSchema, tool, ToolLoopAgent, type LanguageModel, type ModelMessage } from "ai";
 import type {
-  CompanionAnswer, CompanionMemory, CompanionSource, CompanionTurnInput,
+  AiProvider, CompanionAnswer, CompanionMemory, CompanionModelContentPart, CompanionPreparedMessage,
+  CompanionSource, CompanionTurnInput,
 } from "@edgeever/shared";
 import type { DatabaseAdapter } from "./storage-contract";
 import type { CompanionScope, TurnRow } from "./companion-service";
 import type { AppContext } from "./api-context";
 import { companionToolDefinitions, createCompanionTools } from "./companion-agent-tools";
+import { posterToolImage } from "./poster-tool-output";
 import {
   companionAgentInstructions,
   companionExecutionReceipts,
-  companionResumeMessages,
+  companionModelMessages,
   COMPANION_MAX_OUTPUT_TOKENS,
   COMPANION_MAX_STEPS,
   type CompanionRunState,
@@ -31,10 +33,26 @@ export {
   type CompanionRunState,
 } from "./companion-prepare";
 
+const toModelMessages = (messages: CompanionPreparedMessage[]): ModelMessage[] => messages.map((message): ModelMessage => {
+  if (message.role === "assistant") {
+    if (typeof message.content !== "string") throw new Error("Assistant content must be a string.");
+    return { role: "assistant", content: message.content };
+  }
+  if (typeof message.content === "string") return { role: "user", content: message.content };
+  return {
+    role: "user",
+    content: message.content.map((part: CompanionModelContentPart) => {
+      if (part.type === "text") return { type: "text" as const, text: part.text };
+      if (part.type === "image") return { type: "image" as const, image: part.image, mediaType: part.mediaType };
+      return { type: "file" as const, data: part.data, mediaType: part.mediaType, ...(part.filename ? { filename: part.filename } : {}) };
+    }),
+  };
+});
+
 export const streamCompanion = async (args: {
   db: DatabaseAdapter; scope: CompanionScope; input: CompanionTurnInput; model: LanguageModel;
   memories: CompanionMemory[]; history: TurnRow[]; revision: number; signal: AbortSignal;
-  sources: CompanionSource[]; assertActive: () => Promise<void>;
+  sources: CompanionSource[]; assertActive: () => Promise<void>; provider?: AiProvider;
   context?: AppContext; run?: CompanionRunState; resume?: { response?: string; answers?: CompanionAnswer[] };
 }) => {
   const run = args.run ?? { tools: [], todos: [], questions: [], pause: { ask: false } };
@@ -52,17 +70,31 @@ export const streamCompanion = async (args: {
           if (!selected) throw new Error(`Missing companion tool: ${definition.name}`);
           return selected.execute(input);
         },
+        ...(definition.name === "get_poster_preview" || definition.name === "export_poster" ? {
+          toModelOutput: ({ output }: { output: unknown }) => {
+            const visual = posterToolImage(definition.name, output);
+            if (!visual) return { type: "text" as const, value: JSON.stringify(output) };
+            return { type: "content" as const, value: [
+              { type: "text" as const, text: JSON.stringify(visual.metadata) },
+              { type: "file" as const, mediaType: visual.image.mimeType, data: { type: "data" as const, data: visual.image.data } },
+            ] };
+          },
+        } : {}),
       }),
     ]),
   );
   const receipts = args.input.allowNotes ? await companionExecutionReceipts(args.db, args.scope, args.input, args.revision, run.tools) : [];
   const agent = new ToolLoopAgent({
     model: args.model,
-    instructions: companionAgentInstructions(args.input, args.memories, receipts),
+    instructions: companionAgentInstructions(args.input, args.memories, receipts, args.history, args.revision),
     tools,
     stopWhen: [isStepCount(COMPANION_MAX_STEPS), () => run.pause.ask],
     maxOutputTokens: COMPANION_MAX_OUTPUT_TOKENS,
     maxRetries: 0,
   });
-  return agent.stream({ messages: companionResumeMessages(args.input, args.history, args.revision, args.resume), abortSignal: args.signal });
+  const messages = await companionModelMessages({
+    db: args.db, scope: args.scope, input: args.input, history: args.history, revision: args.revision,
+    resume: args.resume, provider: args.provider ?? "openai-compatible", turnId: args.input.id,
+  });
+  return agent.stream({ messages: toModelMessages(messages), abortSignal: args.signal });
 };

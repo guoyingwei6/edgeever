@@ -8,13 +8,12 @@ import {
   hasNotebookDragData,
   getMemoDragIds,
   getNotebookDropPosition,
-  notebookTreeContainsId,
   focusNotebookTreeButton,
   NOTEBOOK_DRAG_MIME,
   setMemoDragPreview,
 } from "@/lib/app-helpers";
 import { cn } from "@/lib/utils";
-import type { Notebook } from "@edgeever/shared";
+import { formatNotebookMemoCount, type Notebook } from "@edgeever/shared";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -41,6 +40,7 @@ export const NotebookTreeItem = ({
   onOpenChange,
   expandSiblingsRequest,
   onExpandSiblings,
+  showDescendantNotes,
 }: {
   node: NotebookNode;
   depth: number;
@@ -56,13 +56,14 @@ export const NotebookTreeItem = ({
   onOpenChange: (notebookId: string, open: boolean) => void;
   expandSiblingsRequest: { parentId: string | null; token: number } | null;
   onExpandSiblings: (parentId: string | null) => void;
+  showDescendantNotes: boolean;
 }) => {
   const { t } = useTranslation();
   const open = !collapsedNotebookIds.has(node.id);
   const hasChildren = node.children.length > 0;
+  const showsSplitCount = !showDescendantNotes && hasChildren;
   const selected = node.id === selectedNotebookId;
   const isInbox = node.slug === "inbox";
-  const hasSelectedDescendant = selectedNotebookId ? notebookTreeContainsId(node.children, selectedNotebookId) : false;
   const [dropPosition, setDropPosition] = useState<NotebookDropPosition | null>(null);
   const [actionsOpen, setActionsOpen] = useState(false);
   const actionsRef = useRef<HTMLDivElement>(null);
@@ -172,16 +173,21 @@ export const NotebookTreeItem = ({
           <div
             data-notebook-id={node.id}
             className={cn(
-              "group relative flex h-9 items-center gap-1 rounded-md px-2 text-xs transition-all duration-200 select-none",
+              "group relative flex h-9 cursor-pointer items-center gap-1 rounded-md px-2 text-xs transition-all duration-200 select-none",
               selected
                 ? "edgeever-workspace-selection font-medium text-slate-950"
-                : hasSelectedDescendant
-                  ? "bg-slate-50 text-slate-900 hover:bg-slate-100"
-                  : "text-slate-700 hover:bg-slate-50",
+                : "text-slate-700 hover:bg-slate-50",
               dropPosition === "inside" && "ring-2 ring-slate-300",
               dropPosition === "inside" && hasChildren && !open && "bg-slate-100"
             )}
             draggable
+            onClick={(event) => {
+              if ((event.target as Element).closest("button")) {
+                return;
+              }
+
+              onSelect(node.id);
+            }}
             onDragStart={(event) => {
               event.dataTransfer.effectAllowed = "move";
               event.dataTransfer.setData(NOTEBOOK_DRAG_MIME, node.id);
@@ -221,9 +227,9 @@ export const NotebookTreeItem = ({
               data-notebook-tree-button
               className="flex min-w-0 flex-1 items-center gap-2 text-left"
               type="button"
-              aria-label={selected
-                ? t("notebookTree.currentWithCount", { name: node.name, count: node.memoCount })
-                : t("notebookTree.switchToWithCount", { name: node.name, count: node.memoCount })}
+              aria-label={showsSplitCount
+                ? t(selected ? "notebookTree.currentWithSplitCount" : "notebookTree.switchToWithSplitCount", { name: node.name, direct: node.directMemoCount, total: node.memoCount })
+                : t(selected ? "notebookTree.currentWithCount" : "notebookTree.switchToWithCount", { name: node.name, count: showDescendantNotes ? node.memoCount : node.directMemoCount })}
               aria-current={selected ? "page" : undefined}
               aria-expanded={hasChildren ? open : undefined}
               onClick={() => onSelect(node.id)}
@@ -260,11 +266,11 @@ export const NotebookTreeItem = ({
                 }
               }}
             >
-              <NotebookIcon className={cn("h-4 w-4 shrink-0 transition-colors duration-200", selected || hasSelectedDescendant ? "text-slate-700" : "text-slate-500")} />
+              <NotebookIcon className={cn("h-4 w-4 shrink-0 transition-colors duration-200", selected ? "text-slate-950" : "text-slate-500")} />
               <span
                 className={cn(
-                  "truncate font-medium transition-colors duration-200",
-                  selected ? "text-slate-950" : hasSelectedDescendant ? "text-slate-900" : "text-slate-800 group-hover:text-slate-950"
+                  "truncate transition-colors duration-200",
+                  selected ? "font-semibold text-black dark:text-slate-950" : "font-medium text-slate-800 group-hover:text-slate-950"
                 )}
               >
                 {node.name}
@@ -272,11 +278,11 @@ export const NotebookTreeItem = ({
               <span
                 className={cn(
                   "shrink-0 tabular-nums text-xs font-normal transition-colors duration-200",
-                  selected ? "text-slate-600 font-medium" : "text-slate-400 group-hover:text-slate-500"
+                  selected ? "text-slate-900 font-medium" : "text-slate-400 group-hover:text-slate-500"
                 )}
                 aria-hidden="true"
               >
-                {node.memoCount}
+                {formatNotebookMemoCount({ directCount: node.directMemoCount, totalCount: node.memoCount, hasChildren }, showDescendantNotes)}
               </span>
             </button>
             <div ref={actionsRef} className="relative shrink-0">
@@ -399,6 +405,7 @@ export const NotebookTreeItem = ({
               onOpenChange={onOpenChange}
               expandSiblingsRequest={expandSiblingsRequest}
               onExpandSiblings={onExpandSiblings}
+              showDescendantNotes={showDescendantNotes}
             />
           ))}
         </m.div>

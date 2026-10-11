@@ -413,8 +413,11 @@ export const createWebRepository = (scope: string): EdgeEverRepository => {
     return { ok: true as const, deleted };
   },
   emptyTrash: async () => {
+    const memoIds = (await localDb.memos.where("scope").equals(scope).toArray())
+      .filter((memo) => memo.isDeleted)
+      .map((memo) => memo.id);
     const deleted = await applyLocalEmptyTrash(scope);
-    await queueLocalAction(scope, "memo.emptyTrash", "trash", {});
+    await queueLocalAction(scope, "memo.emptyTrash", "trash", { memoIds });
     window.dispatchEvent(new CustomEvent("edgeever:sync-queue-changed"));
     return { ok: true as const, deleted };
   },
@@ -442,7 +445,8 @@ export const createWebRepository = (scope: string): EdgeEverRepository => {
 
     const remote = await api.listMemos({
       notebookId: params.notebookId,
-      includeDescendants: Boolean(params.notebookIds?.length),
+      // The scope reaches sub-notebooks only when it lists more than the notebook itself.
+      includeDescendants: Boolean(params.notebookIds?.some((notebookId) => notebookId !== params.notebookId)),
       q: params.q,
       tag: params.tag,
       trash: params.trash,

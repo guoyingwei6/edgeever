@@ -1,7 +1,7 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { autoUpdate, useFloating } from "@floating-ui/react-dom";
-import { FileDown, Pencil, Save, Trash2, X } from "lucide-react";
+import { AudioLines, FileDown, Pencil, Save, Trash2, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import {
@@ -21,11 +21,19 @@ import type { ResourceMenuTarget } from "./useEditorResourceActions";
 import { attachmentResourceMenuPosition } from "./attachment-resource-menu";
 import { imageResourceMenuPosition } from "./image-resource-menu-position";
 
-export const IconTooltip = ({ label, children }: { label: string; children: ReactNode }) => (
+export const IconTooltip = ({
+  label,
+  side = "bottom",
+  children,
+}: {
+  label: string;
+  side?: "top" | "right" | "bottom" | "left";
+  children: ReactNode;
+}) => (
   <TooltipProvider delayDuration={0} skipDelayDuration={0}>
     <Tooltip>
       <TooltipTrigger asChild>{children}</TooltipTrigger>
-      <TooltipContent side="bottom">{label}</TooltipContent>
+      <TooltipContent side={side}>{label}</TooltipContent>
     </Tooltip>
   </TooltipProvider>
 );
@@ -66,6 +74,7 @@ export const NoteLinkInteractionHint = ({
 type ResourceActionLabels = {
   download: string;
   saveAs: string;
+  transcribe: string;
   rename: string;
   delete: string;
   unavailable: string;
@@ -75,9 +84,11 @@ export const ResourceActionMenu = ({
   target,
   canRename,
   canDelete,
+  canTranscribe,
   labels,
   onDownload,
   onSaveAs,
+  onTranscribe,
   onRename,
   onDelete,
   onMouseEnter,
@@ -86,9 +97,11 @@ export const ResourceActionMenu = ({
   target: ResourceMenuTarget;
   canRename: boolean;
   canDelete: boolean;
+  canTranscribe: boolean;
   labels: ResourceActionLabels;
   onDownload: () => void;
   onSaveAs: () => void;
+  onTranscribe: () => void;
   onRename: () => void;
   onDelete: () => void;
   onMouseEnter: () => void;
@@ -140,6 +153,14 @@ export const ResourceActionMenu = ({
           {labels.saveAs}
         </Button>
       </IconTooltip>
+      {canTranscribe ? (
+        <IconTooltip label={labels.transcribe}>
+          <Button type="button" size="sm" variant="ghost" aria-label={labels.transcribe} onClick={onTranscribe}>
+            <AudioLines className="h-3.5 w-3.5" />
+            {labels.transcribe}
+          </Button>
+        </IconTooltip>
+      ) : null}
       <IconTooltip label={canRename ? labels.rename : labels.unavailable}>
         <Button type="button" size="sm" variant="ghost" aria-label={labels.rename} disabled={!canRename} onClick={onRename}>
           <Pencil className="h-3.5 w-3.5" />

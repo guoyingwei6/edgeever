@@ -34,6 +34,7 @@ import type {
   MemoRevision,
   MemoSummary,
   MemoShare,
+  ManagedMemoShare,
   PublicTableForm,
   TableFormSettings,
   TableFormUpdateInput,
@@ -53,8 +54,10 @@ import type {
   TagSummary,
   TiptapDoc,
   AiSettings,
+  AiTranscriptionSettings,
   AiDiscoveredModel,
   AiProvider,
+  AiTranscriptionStandard,
   AiPromptTemplate,
   AiPromptTemplateCreateInput,
   AiPromptTemplateUpdateInput,
@@ -73,7 +76,7 @@ import type {
   PluginPublicFetchResponse,
 } from "@edgeever/shared";
 
-const MAX_SINGLE_REQUEST_UPLOAD_BYTES = 5 * 1024 * 1024;
+export const MAX_SINGLE_REQUEST_UPLOAD_BYTES = 5 * 1024 * 1024;
 
 async function consumeEventStream<T>(body: ReadableStream<Uint8Array>, onEvent: (event: T) => void) {
   const reader = body.getReader();
@@ -123,7 +126,7 @@ export type MultipartResourceUploadSource = {
   filename: string;
   mimeType: string;
   byteSize: number;
-  readPart: (start: number, end: number) => Promise<Blob>;
+  readPart: (start: number, end: number) => Promise<Blob | Uint8Array<ArrayBuffer>>;
 };
 
 export type InstanceHealth = {
@@ -134,6 +137,7 @@ export type InstanceHealth = {
   authMode?: string | null;
   build?: string | null;
   deployment?: DeploymentMetadata | null;
+  deploymentVersionCreatedAt?: string | null;
   migration?: string | null;
   storage?: {
     database?: "d1" | "sqlite" | string | null;
@@ -250,6 +254,11 @@ export type MemoShareResponse = {
   share: MemoShare | null;
 };
 
+export type ListMemoSharesResponse = {
+  shares: ManagedMemoShare[];
+  nextOffset: number | null;
+};
+
 export type PublicMemoShareResponse = {
   share: PublicMemoShare;
 };
@@ -295,6 +304,23 @@ export type AiProviderCreatePayload = {
 
 export type AiProviderUpdatePayload = {
   provider: AiProvider;
+  displayName: string;
+  baseUrl: string;
+  apiKey?: string;
+  isEnabled: boolean;
+};
+
+export type AiTranscriptionProviderCreatePayload = {
+  provider: AiTranscriptionStandard;
+  displayName: string;
+  baseUrl: string;
+  apiKey: string;
+  isEnabled: boolean;
+  initialModelId?: string;
+};
+
+export type AiTranscriptionProviderUpdatePayload = {
+  provider: AiTranscriptionStandard;
   displayName: string;
   baseUrl: string;
   apiKey?: string;
@@ -894,6 +920,56 @@ export const createEdgeEverClient = (options: EdgeEverClientOptions = {}) => {
       return request<AiSettings>(`/api/v1/ai/settings${search}`);
     },
 
+    getAiTranscriptionSettings: () =>
+      request<AiTranscriptionSettings>("/api/v1/ai/transcription-settings"),
+
+    createAiTranscriptionProvider: (payload: AiTranscriptionProviderCreatePayload) =>
+      request<AiTranscriptionSettings>("/api/v1/ai/transcription-providers", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }),
+
+    updateAiTranscriptionProvider: (providerId: string, payload: AiTranscriptionProviderUpdatePayload) =>
+      request<AiTranscriptionSettings>(`/api/v1/ai/transcription-providers/${encodeURIComponent(providerId)}`, {
+        method: "PUT",
+        body: JSON.stringify(payload),
+      }),
+
+    deleteAiTranscriptionProvider: (providerId: string) =>
+      request<AiTranscriptionSettings>(`/api/v1/ai/transcription-providers/${encodeURIComponent(providerId)}`, {
+        method: "DELETE",
+      }),
+
+    addAiTranscriptionModel: (providerId: string, payload: { modelId: string; displayName?: string }) =>
+      request<AiTranscriptionSettings>(`/api/v1/ai/transcription-providers/${encodeURIComponent(providerId)}/models`, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }),
+
+    deleteAiTranscriptionModel: (providerId: string, modelConfigId: string) =>
+      request<AiTranscriptionSettings>(
+        `/api/v1/ai/transcription-providers/${encodeURIComponent(providerId)}/models/${encodeURIComponent(modelConfigId)}`,
+        { method: "DELETE" },
+      ),
+
+    updateDefaultAiTranscriptionModel: (modelConfigId: string | null) =>
+      request<AiTranscriptionSettings>("/api/v1/ai/transcription-default-model", {
+        method: "PUT",
+        body: JSON.stringify({ modelConfigId }),
+      }),
+
+    prepareNoteResourceTranscription: (memoId: string, resourceId: string, signal?: AbortSignal) =>
+      request<{ baseUrl: string; modelId: string; apiKey: string; resourceId: string; filename: string }>(
+        `/api/v1/memos/${encodeURIComponent(memoId)}/resources/${encodeURIComponent(resourceId)}/transcription-target`,
+        { method: "POST", signal },
+      ),
+
+    getAiTranscriptionDirectCredential: (providerId: string, signal?: AbortSignal) =>
+      request<{ apiKey: string }>(
+        `/api/v1/ai/transcription-providers/${encodeURIComponent(providerId)}/direct-credential`,
+        { method: "POST", signal },
+      ),
+
     createAiProvider: (payload: AiProviderCreatePayload) =>
       request<AiSettings>("/api/v1/ai/providers", {
         method: "POST",
@@ -1078,6 +1154,11 @@ export const createEdgeEverClient = (options: EdgeEverClientOptions = {}) => {
       );
     },
     clearCompanionHistory: () => request<{ ok: true }>("/api/v1/companion/history", { method: "DELETE" }),
+    uploadCompanionAttachment: (attachment: { filename: string; mediaType: string; base64Data: string }) =>
+      request<{ attachment: { id: string; filename: string; mediaType: string; byteLength: number; expiresAt: string } }>(
+        "/api/v1/companion/attachments",
+        { method: "POST", body: JSON.stringify(attachment) },
+      ),
     exportCompanion: () => request<{ version: 2; controls: { useMemory: boolean; learningEnabled: boolean }; exportedAt: string; memories: CompanionMemory[]; turns: CompanionTurn[]; actions: CompanionAction[] }>("/api/v1/companion/export"),
     importCompanionMemories: (memories: { content: string; kind?: "explicit" | "inferred" }[], controls?: { useMemory: boolean; learningEnabled: boolean }) => request<{ memories: CompanionMemory[] }>("/api/v1/companion/import-memories", {
       method: "POST", body: JSON.stringify({ version: 2, memories, controls }),
@@ -1517,6 +1598,9 @@ export const createEdgeEverClient = (options: EdgeEverClientOptions = {}) => {
     getMemoShare: (memoId: string) =>
       request<MemoShareResponse>(`/api/v1/memos/${memoId}/share`),
 
+    listMemoShares: (offset = 0, limit = 50) =>
+      request<ListMemoSharesResponse>(`/api/v1/memo-shares?offset=${offset}&limit=${limit}`),
+
     createMemoShare: (memoId: string) =>
       request<{ share: MemoShare }>(`/api/v1/memos/${memoId}/share`, {
         method: "POST",
@@ -1694,6 +1778,16 @@ export const createEdgeEverClient = (options: EdgeEverClientOptions = {}) => {
       return response.text();
     },
 
+    getCommunityPluginRegistry: async () => {
+      const { context, response } = await send("/api/v1/plugins/community-registry", undefined, { setJsonContentType: false });
+      if (response.status === 404) return null;
+      if (!response.ok) await throwRequestError(context, response, "Community registry request failed");
+      return {
+        bytes: await response.arrayBuffer(),
+        signatureBase64: response.headers.get("x-edgeever-community-registry-signature") ?? "",
+      };
+    },
+
     getGithubPluginRelease: async (owner: string, repository: string, releaseTag: string) => {
       const path = `/api/v1/plugins/github/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}/releases/tags/${encodeURIComponent(releaseTag)}`;
       const { context, response } = await send(path, undefined, { setJsonContentType: false });
@@ -1732,6 +1826,8 @@ export const createEdgeEverClient = (options: EdgeEverClientOptions = {}) => {
       });
     },
 
+    claimPosterRender: () => request<{ job: null | { id: string; memoId: string; expectedRevision: number; templateId: string | null; claimToken: string; expiresAt: string } }>("/api/v1/poster-render/claim", { method: "POST", body: "{}" }),
+    completePosterRender: (id: string, input: { claimToken: string; document?: import("@edgeever/shared").PosterDocument; errorCode?: "render_failed" | "revision_conflict" | "client_timeout" }) => request<{ job: { status: string } }>(`/api/v1/poster-render/${encodeURIComponent(id)}/complete`, { method: "POST", body: JSON.stringify(input) }),
     uploadMemoResourceParts,
 
     updateMemo: (

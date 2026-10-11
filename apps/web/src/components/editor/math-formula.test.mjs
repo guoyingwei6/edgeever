@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { Editor } from "@tiptap/core";
-import { createEdgeEverDocumentExtensions } from "@edgeever/shared";
+import { createEdgeEverDocumentExtensions, createEdgeEverMarkdownManager } from "@edgeever/shared";
 import { createEdgeEverMathematics } from "@edgeever/shared/mathematics";
+import { ensureTestWindowDom } from "../../lib/restore-test-global.mjs";
 import {
   applyMathFormula,
   deleteMathFormula,
@@ -9,14 +10,25 @@ import {
   selectedTextAsLatex,
 } from "./math-formula.ts";
 
-const createEditor = (content) => new Editor({
-  extensions: createEdgeEverDocumentExtensions({
-    mathematics: createEdgeEverMathematics(),
-  }),
-  content,
-});
+const createEditor = (content) => {
+  ensureTestWindowDom();
+  return new Editor({
+    extensions: createEdgeEverDocumentExtensions({
+      mathematics: createEdgeEverMathematics(),
+    }),
+    content,
+  });
+};
 
 describe("math formula commands", () => {
+  test("browser Markdown schema imports math fences as rendered formula nodes", () => {
+    const manager = createEdgeEverMarkdownManager({ mathematics: createEdgeEverMathematics() });
+    const content = manager.parse("```math\n\\Gamma(z) = \\int_0^\\infty t^{z-1}e^{-t}dt\\,.\n```");
+    const editor = createEditor(content);
+    expect(editor.getJSON().content[0].type).toBe("blockMath");
+    expect(manager.parse(manager.serialize(editor.getJSON()))).toEqual(editor.getJSON());
+    editor.destroy();
+  });
   test("inserts inline math at the caret", () => {
     const editor = createEditor({
       type: "doc",
