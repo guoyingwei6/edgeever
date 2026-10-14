@@ -12,6 +12,7 @@ import {
   AI_SIDEBAR_SOURCE_KEY,
   AI_SIDEBAR_SELECTION_EVENT,
   displayedDesktopAcpAdapter,
+  desktopAcpLoginRetryAvailable,
   listDesktopAcpAdapters,
   installDesktopAcpAdapter,
   authenticateDesktopAcpAdapter,
@@ -47,6 +48,8 @@ const statusKey = (adapter: DesktopAcpAdapter | undefined, probing: boolean) => 
   if (!adapter || adapter.detail === "not_probed") return "aiAssistant.agentSource.notProbed";
   if (adapter.detail === "workbuddy_credentials_unavailable") return "aiAssistant.agentSource.workbuddyCredentialsUnavailable";
   if (adapter.detail === "authentication_timeout") return "aiAssistant.agentSource.authenticationTimedOut";
+  if (adapter.detail === "identity_status_unavailable") return "aiAssistant.agentSource.identityStatusNotReported";
+  if (adapter.id === "claudeCode" && adapter.state === "needs_login") return "aiAssistant.agentSource.claudeCodeCredentialsRequired";
   if (adapter.detail === "authentication_failed") return "aiAssistant.agentSource.authenticationFailed";
   if (adapter.detail === "invalid_path") return "aiAssistant.agentSource.invalidPath";
   if (adapter.detail === "desktop_unavailable") return "aiAssistant.agentSource.localDisabled";
@@ -58,7 +61,6 @@ const statusKey = (adapter: DesktopAcpAdapter | undefined, probing: boolean) => 
   if (adapter.id === "piAgent" && adapter.state === "not_installed") return adapter.detail === "adapter_missing" ? "aiAssistant.agentSource.piAgentAdapterMissing" : "aiAssistant.agentSource.piAgentNotFound";
   if ((adapter.id === "workbuddyCn" || adapter.id === "workbuddyIntl") && adapter.state === "not_installed") return "aiAssistant.agentSource.workbuddyNotFound";
   if ((adapter.id === "workbuddyCn" || adapter.id === "workbuddyIntl") && adapter.state === "needs_login") return "aiAssistant.agentSource.workbuddyLoginRequired";
-  if ((adapter.id === "workbuddyCn" || adapter.id === "workbuddyIntl") && adapter.state === "available") return "aiAssistant.agentSource.workbuddyConnectionReady";
   return `aiAssistant.agentSource.states.${adapter.state}`;
 };
 
@@ -128,7 +130,10 @@ const DesktopAcpAgentCardBody = ({ bridge }: { bridge: boolean }) => {
   useEffect(() => {
     let cancelled = false;
     const refresh = () => void listDesktopAcpAdapters().then((adapters) => {
-      if (!cancelled) setListed(adapters);
+      if (!cancelled) {
+        setListed(adapters);
+        setAdapterPath(adapters.find((adapter) => adapter.id === "antigravity")?.customPath ?? "");
+      }
     }).catch(() => {});
     refresh();
     const interval = window.setInterval(refresh, 5_000);
@@ -150,11 +155,14 @@ const DesktopAcpAgentCardBody = ({ bridge }: { bridge: boolean }) => {
   const authMethods = shown?.authMethods?.filter((method) => (
     adapterId === "workbuddyCn" ? method.id !== "external" : adapterId === "workbuddyIntl" ? method.id !== "internal" : true
   )) ?? [];
+  const canRetryLogin = desktopAcpLoginRetryAvailable(shown);
   const hasDetails = Boolean(
+    canRetryLogin ||
     shown?.state === "not_installed" ||
     shown?.state === "needs_login" ||
     (shown?.state === "available" && (isWorkBuddy || authMethods.length > 0)) ||
     shown?.updateError ||
+    shown?.detail === "identity_status_unavailable" ||
     adapterId === "openClaw" ||
     (adapterId === "hermesAgent" && shown?.state === "failed")
   );
@@ -162,7 +170,7 @@ const DesktopAcpAgentCardBody = ({ bridge }: { bridge: boolean }) => {
   const authButtons = (
     <div className="flex flex-wrap gap-2 pt-0.5">
       {authMethods.map((method) => (
-        <Button key={method.id} type="button" variant="outline" size="sm" className="h-8 bg-card text-xs font-normal" disabled={Boolean(authenticating)} onClick={() => void authenticate(method.id)}>
+        <Button key={method.id} type="button" variant="outline" size="sm" className="h-8 bg-card text-xs font-normal" disabled={probing || installing || Boolean(authenticating)} onClick={() => void authenticate(method.id)}>
           {authenticating === method.id ? t("aiAssistant.agentSource.authenticating") : isWorkBuddy
             ? t("aiAssistant.agentSource.workbuddyAuthenticateWith", { method: method.name.replace(/^Login with\s+/i, "").replace(/Google\/Github/gi, "Google / GitHub") })
             : t("aiAssistant.agentSource.authenticateWith", { method: method.name })}
@@ -309,7 +317,7 @@ const DesktopAcpAgentCardBody = ({ bridge }: { bridge: boolean }) => {
             </div>
 
             {adapterId === "antigravity" ? (
-              <label className="grid gap-1.5 text-xs font-normal leading-5 text-slate-700">
+              <div className="grid gap-1.5 text-xs font-normal leading-5 text-slate-700">
                 <span className="flex items-center gap-1.5">
                   {t("aiAssistant.agentSource.pathLabel")}
                   <TooltipProvider>
@@ -326,16 +334,21 @@ const DesktopAcpAgentCardBody = ({ bridge }: { bridge: boolean }) => {
                 <Input
                   className="h-8 text-xs"
                   value={adapterPath}
+                  aria-label={t("aiAssistant.agentSource.pathLabel")}
                   spellCheck={false}
                   autoCapitalize="off"
                   autoCorrect="off"
                   placeholder={t("aiAssistant.agentSource.pathPlaceholder")}
-                  onChange={(event) => {
-                    setAdapterPath(event.target.value);
-                    setProbed(null);
-                  }}
+                  readOnly
                 />
-              </label>
+                <Button type="button" variant="outline" size="sm" onClick={() => {
+                  void window.edgeeverDesktop?.chooseAcpAdapterPath?.().then((selected) => {
+                    if (selected) { setAdapterPath(selected); setProbed(null); }
+                  }).catch(() => setInstallError(true));
+                }}>
+                  {t("aiAssistant.agentSource.choosePath")}
+                </Button>
+              </div>
             ) : null}
 
             <div className="space-y-2 rounded-lg bg-muted/40 p-3">
@@ -398,13 +411,19 @@ const DesktopAcpAgentCardBody = ({ bridge }: { bridge: boolean }) => {
                       {t(adapterId === "claudeCode" ? "aiAssistant.agentSource.claudeCodeMissingHint" : adapterId === "openClaw" ? "aiAssistant.agentSource.openClawMissingHint" : adapterId === "hermesAgent" ? "aiAssistant.agentSource.hermesAgentMissingHint" : adapterId === "grokBuild" ? "aiAssistant.agentSource.grokBuildMissingHint" : adapterId === "deepseekHarness" ? "aiAssistant.agentSource.deepseekHarnessMissingHint" : adapterId === "piAgent" ? shown.detail === "adapter_missing" ? "aiAssistant.agentSource.piAgentAdapterMissingHint" : "aiAssistant.agentSource.piAgentMissingHint" : adapterId === "workbuddyCn" || adapterId === "workbuddyIntl" ? "aiAssistant.agentSource.workbuddyMissingHint" : "aiAssistant.agentSource.installHint")}
                     </p>
                   ) : null}
+                  {shown?.detail === "identity_status_unavailable" ? (
+                    <p>{t("aiAssistant.agentSource.identityStatusUnavailable")}</p>
+                  ) : null}
+                  {shown?.state === "needs_login" && adapterId === "claudeCode" ? (
+                    <p>{t("aiAssistant.agentSource.claudeCodeLoginHint")}</p>
+                  ) : null}
                   {shown?.state === "needs_login" && adapterId === "piAgent" ? (
                     <p>{t("aiAssistant.agentSource.piAgentLoginHint")}</p>
                   ) : null}
                   {shown?.state === "available" && isWorkBuddy ? (
                     <p>{t("aiAssistant.agentSource.workbuddyConnectedHint")}</p>
                   ) : null}
-                  {shown?.state === "needs_login" && isWorkBuddy ? (
+                  {(shown?.state === "needs_login" || canRetryLogin) && isWorkBuddy ? (
                     <p>{t(adapterId === "workbuddyCn" ? "aiAssistant.agentSource.workbuddyCnLoginHint" : "aiAssistant.agentSource.workbuddyIntlLoginHint")}</p>
                   ) : null}
                   {shown?.state === "available" && !isWorkBuddy && authMethods.length ? (
@@ -420,7 +439,7 @@ const DesktopAcpAgentCardBody = ({ bridge }: { bridge: boolean }) => {
                       </CollapsibleTrigger>
                       <CollapsibleContent>{authButtons}</CollapsibleContent>
                     </Collapsible>
-                  ) : (shown?.state === "needs_login" || shown?.state === "available") && authMethods.length ? authButtons : null}
+                  ) : (shown?.state === "needs_login" || shown?.state === "available" || canRetryLogin) && authMethods.length ? authButtons : null}
                   {shown?.state === "needs_login" && !authMethods.length && adapterId !== "piAgent" ? (
                     <p className="text-xs text-amber-700" role="status">{t("aiAssistant.agentSource.loginUnavailable")}</p>
                   ) : null}

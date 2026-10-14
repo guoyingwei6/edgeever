@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { aiSidebarAdapterFromStorage, aiSidebarSourceFromStorage, displayedDesktopAcpAdapter } from "./desktop-acp.ts";
+import { desktopAcpLoginRetryAvailable, desktopAcpNoteAccessErrorKey, aiSidebarAdapterFromStorage, aiSidebarSourceFromStorage, displayedDesktopAcpAdapter } from "./desktop-acp.ts";
 
 test("a checked custom Antigravity executable takes priority over the managed connector status", () => {
   const managed = { id: "antigravity", label: "Antigravity", state: "failed", version: "1.2.1", managed: true };
@@ -134,4 +134,25 @@ test("the quick selector hides absent connectors while keeping detected agents a
   const custom = { ...absent, id: "antigravity" };
   expect(desktopAcpSelectorVisible(custom, " /custom/agy ")).toBe(true);
   expect(desktopAcpSelectorVisible(custom, "  ")).toBe(false);
+});
+
+test("note access failures distinguish network, EdgeEver sign-in, and account changes", () => {
+  expect(desktopAcpNoteAccessErrorKey("note_access_network")).toBe("aiAssistant.sidebar.noteAccessNetwork");
+  expect(desktopAcpNoteAccessErrorKey("note_access_login_required")).toBe("aiAssistant.sidebar.noteAccessLoginRequired");
+  expect(desktopAcpNoteAccessErrorKey("note_access_changed")).toBe("aiAssistant.sidebar.noteAccessChanged");
+  expect(desktopAcpNoteAccessErrorKey("note_access_unavailable")).toBe("aiAssistant.sidebar.noteAccessUnavailable");
+  expect(desktopAcpNoteAccessErrorKey("needs_login")).toBeNull();
+});
+
+test("WorkBuddy connection failures keep an edition-specific sign-in recovery path", () => {
+  for (const id of ["workbuddyCn", "workbuddyIntl"]) {
+    const methodId = id === "workbuddyCn" ? "internal" : "external";
+    const adapter = { id, state: "failed", authMethods: [{ id: methodId, name: "Browser" }] };
+    expect(desktopAcpLoginRetryAvailable(adapter)).toBe(true);
+    expect(desktopAcpLoginRetryAvailable({ ...adapter, detail: "workbuddy_credentials_unavailable" })).toBe(false);
+    expect(desktopAcpLoginRetryAvailable({ ...adapter, authMethods: [] })).toBe(false);
+    expect(desktopAcpLoginRetryAvailable({ ...adapter, authMethods: [{ id: methodId === "internal" ? "external" : "internal" }] })).toBe(false);
+  }
+  expect(desktopAcpLoginRetryAvailable(undefined)).toBe(false);
+  expect(desktopAcpLoginRetryAvailable({ id: "codex", state: "failed", authMethods: [{ id: "browser" }] })).toBe(false);
 });

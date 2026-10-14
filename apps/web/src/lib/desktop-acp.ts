@@ -19,6 +19,15 @@ export type DesktopAcpAdapter = {
   authMethods?: Array<{ id: string; name: string }>;
 };
 
+// Offer only login methods advertised by the agent. Unreadable saved tokens
+// require a different remedy and must not invite a futile sign-in loop.
+export const desktopAcpLoginRetryAvailable = (adapter: DesktopAcpAdapter | undefined) => Boolean(
+  adapter?.state === "failed" &&
+  (adapter.id === "workbuddyCn" || adapter.id === "workbuddyIntl") &&
+  adapter.detail !== "workbuddy_credentials_unavailable" &&
+  adapter.authMethods?.some((method) => adapter.id === "workbuddyCn" ? method.id !== "external" : method.id !== "internal")
+);
+
 export const displayedDesktopAcpAdapter = ({
   id,
   path,
@@ -202,4 +211,14 @@ export const subscribeDesktopAcp = (callback: (event: DesktopAcpEvent) => void) 
   const desktop = bridge();
   if (!desktop?.onAcpEvent) return () => undefined;
   return desktop.onAcpEvent(callback);
+};
+
+export const desktopAcpNoteAccessErrorKey = (message: string) => {
+  switch (message) {
+    case "note_access_network": return "aiAssistant.sidebar.noteAccessNetwork";
+    case "note_access_login_required": return "aiAssistant.sidebar.noteAccessLoginRequired";
+    case "note_access_changed": return "aiAssistant.sidebar.noteAccessChanged";
+    case "note_access_unavailable": return "aiAssistant.sidebar.noteAccessUnavailable";
+    default: return null;
+  }
 };
