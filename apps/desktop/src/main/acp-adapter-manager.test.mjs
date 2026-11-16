@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { zipSync } from "fflate";
-import { MAX_ARCHIVE_BYTES, MAX_EXTRACTED_BYTES, createAcpAdapterManager, managedAdapterCommand, selectAdapterRelease, selectPiAdapterRelease } from "./acp-adapter-manager.mjs";
+import { ADAPTER_DOWNLOAD_TIMEOUT_MS, MAX_ARCHIVE_BYTES, MAX_EXTRACTED_BYTES, createAcpAdapterManager, managedAdapterCommand, selectAdapterRelease, selectPiAdapterRelease } from "./acp-adapter-manager.mjs";
 
 const codexEntry = (version) => ({
   id: "codex-acp",
@@ -13,6 +13,44 @@ const codexEntry = (version) => ({
 });
 
 describe("managed ACP adapters", () => {
+  test("reports the failed stage and HTTP status, retains the old binary, and retries using the supplied network transport", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "edgeever-acp-network-"));
+    const oldDir = path.join(root, "antigravity", "1.3.0");
+    await mkdir(oldDir, { recursive: true });
+    await writeFile(path.join(oldDir, "agy_acp_server.par"), "old");
+    await writeFile(path.join(root, "installed.json"), JSON.stringify({ antigravity: { version: "1.3.0" } }));
+    let failure = "registry";
+    const requests = [];
+    const archive = "https://dl.google.com/agy-extensions/releases/macos/test.zip";
+    const manager = createAcpAdapterManager({
+      root, platform: "darwin", arch: "arm64",
+      fetchImpl: async (url, init) => {
+        requests.push(url);
+        expect(init.redirect).toBe("error");
+        expect(init.signal.aborted).toBe(false);
+        if (url === archive) return failure === "download" ? new Response("", { status: 503 }) : new Response(zipSync({ "agy_acp_server.par": new TextEncoder().encode("new") }));
+        if (failure === "registry") return new Response("", { status: 502 });
+        return new Response(JSON.stringify({ agents: [{ id: "antigravity-acp", version: "1.4.0", distribution: { binary: { "darwin-aarch64": { archive, cmd: "./agy_acp_server.par" } } } }] }));
+      },
+    });
+    try {
+      for (const stage of ["registry", "download"]) {
+        failure = stage;
+        let error;
+        try { await manager.install("antigravity", async () => ({ state: "available" })); } catch (caught) { error = caught; }
+        expect(error.updateStage).toBe(stage);
+        expect(error.message).toContain(stage === "registry" ? "HTTP 502" : "HTTP 503");
+        expect(manager.get("antigravity").version).toBe("1.3.0");
+        expect(await readdir(path.join(root, "antigravity"))).toEqual(["1.3.0"]);
+      }
+      failure = null;
+      expect((await manager.install("antigravity", async () => ({ state: "available" }))).version).toBe("1.4.0");
+      expect(requests.filter((url) => url === archive)).toHaveLength(2);
+      expect(ADAPTER_DOWNLOAD_TIMEOUT_MS).toBe(600_000);
+      expect(await readFile(path.join(oldDir, "agy_acp_server.par"), "utf8")).toBe("old");
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
   test("accepts only the expected pi ACP npm package and retains the old adapter on a failed update", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "edgeever-managed-pi-"));
     let version = "0.0.34";
@@ -147,37 +185,45 @@ describe("managed ACP adapters", () => {
     }
   });
 
-  test("extracts only expected Antigravity files and rejects archive traversal", async () => {
+  test.each([
+    ["darwin", "arm64", "darwin-aarch64", "agy_acp_server.par", "localharness_external"],
+    ["win32", "x64", "windows-x86_64", "agy_acp_server.exe", "localharness_external.exe"],
+  ])("extracts only expected Antigravity files and rejects archive traversal on %s", async (platform, arch, target, executable, helper) => {
     const root = await mkdtemp(path.join(tmpdir(), "edgeever-managed-agy-"));
     let malicious = false;
     const entry = {
       id: "antigravity-acp",
       version: "1.2.1",
-      distribution: { binary: { "darwin-aarch64": {
-        archive: "https://dl.google.com/agy-extensions/releases/macos/test.zip",
-        cmd: "./agy_acp_server.par",
+      distribution: { binary: { [target]: {
+        archive: "https://dl.google.com/agy-extensions/releases/test.zip",
+        cmd: `./${executable}`,
       } } },
     };
     const manager = createAcpAdapterManager({
       root,
-      platform: "darwin",
-      arch: "arm64",
+      platform,
+      arch,
       fetchImpl: async () => new Response(JSON.stringify({ agents: [entry] }), { status: 200 }),
       downloadImpl: async (_url, destination) => {
         const files = malicious
-          ? { "../outside": [new Uint8Array([1]), { level: 1 }] }
-          : { "agy_acp_server.par": [new Uint8Array([1]), { level: 1 }], localharness_external: [new Uint8Array([2]), { level: 1 }] };
+          ? { [`../${helper}`]: [new Uint8Array([1]), { level: 1 }] }
+          : { [executable]: [new Uint8Array([1]), { level: 1 }], [helper]: [new Uint8Array([2]), { level: 1 }] };
         await writeFile(destination, zipSync(files));
       },
     });
     try {
       malicious = true;
       await expect(manager.install("antigravity", async () => ({ state: "available" }))).rejects.toThrow("invalid_adapter_archive");
-      expect(existsSync(path.join(root, "outside"))).toBe(false);
+      expect(existsSync(path.join(root, "antigravity", helper))).toBe(false);
       malicious = false;
       expect((await manager.install("antigravity", async () => ({ state: "available" }))).updated).toBe(true);
       expect(manager.get("antigravity")?.version).toBe("1.2.1");
-      expect(managedAdapterCommand(root, "antigravity", "1.2.1", { platform: "linux" })?.args).toEqual(["--uid="]);
+      const command = manager.get("antigravity").command.command;
+      expect(path.basename(command)).toBe(executable);
+      expect(await readFile(path.join(path.dirname(command), helper))).toEqual(Buffer.from([2]));
+      if (platform === "darwin") {
+        expect(managedAdapterCommand(root, "antigravity", "1.2.1", { platform: "linux" })?.args).toEqual(["--uid="]);
+      }
     } finally {
       await rm(root, { recursive: true, force: true });
     }

@@ -45,12 +45,12 @@ const mcpRequest = (payload, headers = {}) => ({
 
 const modernMcpRequest = (payload, headers = {}) => {
   const params = {
-    ...(payload.params ?? {}),
+    ...payload.params,
     _meta: {
       "io.modelcontextprotocol/protocolVersion": "2026-07-28",
       "io.modelcontextprotocol/clientInfo": { name: "edgeever-test", version: "1.0.0" },
       "io.modelcontextprotocol/clientCapabilities": {},
-      ...(payload.params?._meta ?? {}),
+      ...payload.params?._meta,
     },
   };
   const name = payload.method === "resources/read" ? params.uri : params.name;
@@ -235,7 +235,22 @@ describe("MCP HTTP routes", () => {
 
     expect(response.status).toBe(401);
     expect(response.headers.get("WWW-Authenticate")).toBe('Bearer realm="EdgeEver MCP"');
-    expect(await response.json()).toMatchObject({ error: { code: -32001 } });
+    expect(await response.json()).toMatchObject({
+      error: { code: -32001, message: expect.stringContaining("Authorization: Bearer <token>") },
+    });
+  });
+
+  test("reports a rejected bearer token as invalid_token", async () => {
+    const response = await createApp({ authenticateRequest: async () => null }).request(
+      "/mcp",
+      mcpRequest({ jsonrpc: "2.0", id: 3, method: "tools/list" }, { Authorization: "Bearer eev_revoked" }),
+    );
+
+    expect(response.status).toBe(401);
+    expect(response.headers.get("WWW-Authenticate")).toBe('Bearer realm="EdgeEver MCP", error="invalid_token"');
+    expect(await response.json()).toMatchObject({
+      error: { code: -32001, message: expect.stringContaining("Invalid or revoked API token") },
+    });
   });
 
   test("delegates known tool calls and preserves structured output", async () => {

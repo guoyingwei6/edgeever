@@ -189,7 +189,7 @@ describe("EdgeEverPluginHost", () => {
       set: async (pluginId, key, value) => secrets.set(`${pluginId}:${key}`, value),
       remove: async (pluginId, key) => secrets.delete(`${pluginId}:${key}`),
       clearNamespace: async (pluginId) => {
-        for (const key of [...secrets.keys()]) if (key.startsWith(`${pluginId}:`)) secrets.delete(key);
+        for (const key of Array.from(secrets.keys())) if (key.startsWith(`${pluginId}:`)) secrets.delete(key);
       },
     };
     const packageStorage = {
@@ -264,7 +264,7 @@ describe("EdgeEverPluginHost", () => {
     await host.dispose();
   });
 
-  test("installs a checksum-pinned marketplace package and removes its cache on uninstall", async () => {
+  test("installs checksum-pinned packages on HTTP, rejects tampering, and removes uninstalled caches", async () => {
     const manifest = {
       type: "plugin",
       id: "org.edgeever.marketplace-test",
@@ -289,7 +289,7 @@ describe("EdgeEverPluginHost", () => {
       put: async (value) => packages.set(`${value.pluginId}:${value.version}`, value),
       remove: async (pluginId, version) => {
         if (version) packages.delete(`${pluginId}:${version}`);
-        else for (const key of [...packages.keys()]) if (key.startsWith(`${pluginId}:`)) packages.delete(key);
+        else for (const key of Array.from(packages.keys())) if (key.startsWith(`${pluginId}:`)) packages.delete(key);
       },
     };
     const secretStorage = {
@@ -313,13 +313,26 @@ describe("EdgeEverPluginHost", () => {
       },
     };
 
-    await host.installMarketplaceEntry(entry);
+    const originalCrypto = Object.getOwnPropertyDescriptor(globalThis, "crypto");
+    Object.defineProperty(globalThis, "crypto", { configurable: true, value: {} });
+    try {
+      await host.installMarketplaceEntry(entry);
 
-    expect(host.getSnapshot().extensions[0].source).toMatchObject({ kind: "marketplace", verified: true });
-    expect(packages.get(`${manifest.id}:${manifest.version}`)?.checksums.mainJs).toBe(entry.verification.checksums.mainJs);
-    await host.uninstall(manifest.id);
-    expect([...packages.keys()].some((key) => key.startsWith(`${manifest.id}:`))).toBe(false);
-    await host.dispose();
+      expect(host.getSnapshot().extensions[0].source).toMatchObject({ kind: "marketplace", verified: true });
+      expect(packages.get(`${manifest.id}:${manifest.version}`)?.checksums.mainJs).toBe(entry.verification.checksums.mainJs);
+      await host.uninstall(manifest.id);
+      expect([...packages.keys()].some((key) => key.startsWith(`${manifest.id}:`))).toBe(false);
+      const originalFetch = globalThis.window.fetch;
+      globalThis.window.fetch = async (input) => String(input).endsWith("/main.js")
+        ? new Response(`${mainJs} // tampered`)
+        : originalFetch(input);
+      await expect(host.installMarketplaceEntry(entry)).rejects.toThrow("mainJs does not match the marketplace verified checksum.");
+      expect(host.getSnapshot().extensions).toHaveLength(0);
+      expect(packages.size).toBe(0);
+    } finally {
+      Object.defineProperty(globalThis, "crypto", originalCrypto);
+      await host.dispose();
+    }
   });
 
   test("rolls back an enabled plugin when an update cannot activate", async () => {
@@ -331,7 +344,7 @@ describe("EdgeEverPluginHost", () => {
       put: async (value) => packages.set(`${value.pluginId}:${value.version}`, value),
       remove: async (id, version) => {
         if (version) packages.delete(`${id}:${version}`);
-        else for (const key of [...packages.keys()]) if (key.startsWith(`${id}:`)) packages.delete(key);
+        else for (const key of Array.from(packages.keys())) if (key.startsWith(`${id}:`)) packages.delete(key);
       },
     };
     const host = new EdgeEverPluginHost({ repository, scope: "test", packageStorage });

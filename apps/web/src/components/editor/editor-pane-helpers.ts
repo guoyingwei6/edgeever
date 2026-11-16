@@ -1,5 +1,6 @@
 import { EditorState } from "@tiptap/pm/state";
 import type { Editor } from "@tiptap/react";
+import type { EditorView } from "@tiptap/pm/view";
 import type { MemoDetail, MemoEditSession, TiptapDoc } from "@edgeever/shared";
 import { releaseHtmlMediaSources } from "@/lib/editor-media-release";
 import { isDesktopResourceRuntime } from "@/lib/desktop-resources";
@@ -9,7 +10,7 @@ import type { MemoUpdateSyncPayload } from "@/lib/local-db";
 import { getAttachmentLinkFromEventTarget } from "./attachment-resource-menu";
 import type { NoteLinkHintPosition } from "./EditorPaneChrome";
 
-export const SUPPORTED_PASTE_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"]);
+export { SUPPORTED_IMAGE_MIME_TYPES as SUPPORTED_PASTE_IMAGE_TYPES } from "@edgeever/shared";
 export const MOBILE_EDITOR_QUERY = "(max-width: 639px)";
 export const MOBILE_DRAFT_PERSIST_DELAY_MS = 800;
 
@@ -86,15 +87,22 @@ export const releaseEditorMedia = (editor: Editor) => {
 /**
  * Replace the document with a fresh EditorState so undo/redo cannot leak
  * across memos. Cheaper than destroying the TipTap view on every switch.
- * Releases decoded images from the previous document first.
+ * Release removed media after updating; unchanged image NodeViews are reused.
  */
 export const resetEditorDocument = (editor: Editor, content: TiptapDoc) => {
-  releaseEditorMedia(editor);
+  const root=editor.view.dom;
+  const previousMedia=Array.from(root.querySelectorAll("img, iframe, embed, object, video, audio, source, canvas"));
   editor.view.updateState(EditorState.create({
     schema: editor.schema,
     doc: editor.schema.nodeFromJSON(content),
     plugins: editor.state.plugins,
   }));
+  // updateState bypasses TipTap's transaction subscribers. Refresh node-view
+  // controls even when the new note reuses the same image and selection.
+  editor.view.dispatch(editor.state.tr.setMeta("addToHistory", false));
+  releaseHtmlMediaSources({
+    querySelectorAll: (selector)=>previousMedia.filter(node=>node.matches(selector) && !root.contains(node)),
+  });
 };
 
 export const CREATED_MEMO_FOCUS_MAX_ATTEMPTS = 120;
@@ -196,6 +204,25 @@ export const shouldInsertDroppedResourceFiles = ({
   dataTransfer: DataTransfer | null;
   isInternalNodeDrag: boolean;
 }) => !isInternalNodeDrag && getResourceFilesFromDataTransfer(dataTransfer).length > 0;
+
+/** Shared by the ProseMirror surface and its surrounding blank canvas. */
+export const handleResourceFileDrop = (
+  view: Pick<EditorView, "editable" | "dragging" | "posAtCoords" | "state">,
+  event: DragEvent,
+  insertFiles: (files: File[], position: number) => boolean,
+) => {
+  if (event.defaultPrevented || !view.editable || !shouldInsertDroppedResourceFiles({
+    dataTransfer: event.dataTransfer,
+    isInternalNodeDrag: Boolean(view.dragging),
+  })) return false;
+
+  // Never replace the current selection. Blank canvas below the document may
+  // have no ProseMirror coordinate, so append at the document boundary instead.
+  const position = view.posAtCoords({ left: event.clientX, top: event.clientY })?.pos
+    ?? view.state.doc.content.size;
+  event.preventDefault();
+  return insertFiles(getResourceFilesFromDataTransfer(event.dataTransfer), position);
+};
 
 export const syncStatusToSaveState = (status: "pending" | "syncing" | "conflict" | "error") => {
   if (status === "conflict") {

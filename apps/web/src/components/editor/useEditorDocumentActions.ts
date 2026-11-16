@@ -1,14 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { Editor } from "@tiptap/react";
-import { docToMarkdown, markdownToDoc, type MemoDetail, type TiptapDoc } from "@edgeever/shared";
+import { docToMarkdown, markdownToDoc, type MemoDetail, type ResolvedNoteProse, type TiptapDoc } from "@edgeever/shared";
+import { useMermaidTheme } from "@/components/ThemeProvider";
 import type { MemoDocumentActionRequest } from "@/lib/app-helpers";
+import { notePrintAppearanceFromProse } from "@/lib/note-print-appearance";
 import { buildSingleNoteMarkdown, downloadMarkdownFile } from "@/lib/note-markdown-export";
 import { downloadNoteHtmlFile, getHtmlImageEmbedNoticeKind } from "@/lib/note-html-export";
 import { NOTE_HTML_FULL_STYLES } from "@/lib/note-html-export-assets";
 import { openNotePrintPreview, serializeNoteDocumentForPrint } from "@/lib/note-print";
 import type { NoteImageFormat } from "@/lib/note-image-export";
 import { copyEditorToWeChat, copyMarkdownToWeChat } from "@/lib/wechat-copy";
+import { publishImageErrorMessage } from "@/lib/publish-image-host";
 import { formatDateTime, parseTagsText } from "@/lib/utils";
 import type { ShareNoteImageSource } from "@/components/dialogs/ShareNoteImageDialog";
 import { dispatchMemoDocumentAction, resolveEditorExportContent } from "./editor-document-actions";
@@ -25,6 +28,7 @@ export const useEditorDocumentActions = ({
   hydratedEditorMemoId,
   markdownSource,
   memo,
+  noteProse,
   notebookName,
   onDocumentActionConsumed,
   onSaveAsTemplate,
@@ -41,6 +45,7 @@ export const useEditorDocumentActions = ({
   hydratedEditorMemoId: string | null;
   markdownSource: string;
   memo: MemoDetail | null;
+  noteProse: ResolvedNoteProse;
   notebookName: string;
   onDocumentActionConsumed?: (requestId: number) => void;
   onSaveAsTemplate: (memo: MemoDetail, name: string) => Promise<void>;
@@ -50,10 +55,12 @@ export const useEditorDocumentActions = ({
   useMobilePlainTextEditor: boolean;
 }) => {
   const { t, i18n } = useTranslation();
+  const { mermaidTheme } = useMermaidTheme();
   const [shareOpen, setShareOpen] = useState(false);
   const [imageShareOpen, setImageShareOpen] = useState(false);
   const [imageShareSource, setImageShareSource] = useState<ShareNoteImageSource | null>(null);
   const [wechatCopyState, setWechatCopyState] = useState<WechatCopyState>("idle");
+  const [wechatCopyError, setWechatCopyError] = useState<string | null>(null);
   const wechatCopyPendingRef = useRef(false);
   const wechatCopyResetTimerRef = useRef<number | null>(null);
 
@@ -84,6 +91,7 @@ export const useEditorDocumentActions = ({
       window.clearTimeout(wechatCopyResetTimerRef.current);
     }
     setWechatCopyState("copying");
+    setWechatCopyError(null);
     try {
       if (useMarkdownSourceEditor) {
         await copyMarkdownToWeChat(markdownSource);
@@ -92,9 +100,10 @@ export const useEditorDocumentActions = ({
       }
       setWechatCopyState("copied");
       wechatCopyResetTimerRef.current = window.setTimeout(() => setWechatCopyState("idle"), 2200);
-    } catch {
+    } catch (error) {
+      setWechatCopyError(publishImageErrorMessage(error));
       setWechatCopyState("error");
-      wechatCopyResetTimerRef.current = window.setTimeout(() => setWechatCopyState("idle"), 2600);
+      wechatCopyResetTimerRef.current = window.setTimeout(() => setWechatCopyState("idle"), 8000);
     } finally {
       wechatCopyPendingRef.current = false;
     }
@@ -119,6 +128,7 @@ export const useEditorDocumentActions = ({
         updatedAt: formatDateTime(memo.updatedAt),
         html: serializeNoteDocumentForPrint(editor, content.document),
         language: i18n.resolvedLanguage ?? i18n.language,
+        appearance: notePrintAppearanceFromProse(noteProse, mermaidTheme),
         labels: {
           close: t("editor.pdfExport.close"),
           error: t("editor.pdfExport.error"),
@@ -134,7 +144,7 @@ export const useEditorDocumentActions = ({
     if (!opened) {
       window.alert(t("editor.pdfExport.popupBlocked"));
     }
-  }, [editor, i18n.language, i18n.resolvedLanguage, memo, notebookName, resolveExportContent, t, tagsText, title]);
+  }, [editor, i18n.language, i18n.resolvedLanguage, memo, mermaidTheme, noteProse, notebookName, resolveExportContent, t, tagsText, title]);
 
   const handleExportMarkdown = useCallback(() => {
     const content = resolveExportContent();
@@ -283,5 +293,6 @@ export const useEditorDocumentActions = ({
     setShareOpen,
     shareOpen,
     wechatCopyState,
+    wechatCopyError,
   };
 };

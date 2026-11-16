@@ -2,7 +2,7 @@ import { fileURLToPath, URL } from "node:url";
 import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { build as buildStandaloneScript } from "esbuild";
-import { defineConfig } from "vite";
+import { defaultClientConditions, defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import extensionPackage from "./package.json";
@@ -15,7 +15,7 @@ const require = createRequire(import.meta.url);
 
 export default defineConfig({
   root: fileURLToPath(new URL(".", import.meta.url)),
-  resolve: { alias: { "@": fileURLToPath(new URL("../web/src", import.meta.url)) }, dedupe: ["react", "react-dom"] },
+  resolve: { conditions: ["worker", ...defaultClientConditions], alias: { "@": fileURLToPath(new URL("../web/src", import.meta.url)) }, dedupe: ["react", "react-dom"] },
   plugins: [
     react(),
     tailwindcss(),
@@ -54,6 +54,15 @@ export default defineConfig({
           .map((item) => item.type === "asset" ? typeof item.source === "string" ? item.source : new TextDecoder().decode(item.source) : "")
           .join("\n");
         if (!themeStyles) throw new Error("Missing compiled extension theme for shadow notifications");
+        const region = await buildStandaloneScript({
+          entryPoints: [fileURLToPath(new URL("./src/region-clip.ts", import.meta.url))],
+          bundle: true, format: "iife", platform: "browser", target: "es2022", minify: true, write: false,
+          jsx: "automatic",
+          define: { "process.env.NODE_ENV": '"production"', __CLIP_REGION_CSS__: JSON.stringify(themeStyles) },
+          legalComments: "eof",
+        });
+        this.emitFile({ type: "asset", fileName: "assets/region-clip.js", source: region.outputFiles[0].contents });
+        this.emitFile({ type: "asset", fileName: "THIRD_PARTY_NOTICES.txt", source: await readFile(new URL("./THIRD_PARTY_NOTICES.md", import.meta.url), "utf8") });
         const feedback = await buildStandaloneScript({
           entryPoints: [fileURLToPath(new URL("./src/ui/clip-feedback.tsx", import.meta.url))],
           bundle: true, format: "iife", platform: "browser", target: "es2022", minify: true, write: false,

@@ -1,7 +1,8 @@
 import type { AnyExtension } from "@tiptap/core";
-import Image from "@tiptap/extension-image";
+import { EdgeEverImage as Image, ImageAlignmentAttributes } from "./image-alignment";
+import { ImageLinkAttributes } from "./image-link";
 import { TaskList } from "@tiptap/extension-list";
-import { TableKit } from "@tiptap/extension-table";
+import { EdgeEverTableKit as TableKit } from "./markdown-table";
 import { Markdown } from "@tiptap/markdown";
 import StarterKit from "@tiptap/starter-kit";
 import { createEdgeEverDetailsExtensions } from "./details";
@@ -14,6 +15,7 @@ import { EmptyExternalLink } from "./empty-external-link";
 import { EdgeEverLink } from "./editor-link";
 import { createEdgeEverTaskItem } from "./task-item-input";
 import { MathCodeFence } from "./mathematics-markdown";
+import { createEdgeEverMarked } from "./markdown-options";
 
 export type CreateEdgeEverDocumentExtensionsOptions = {
   mathematics: AnyExtension[];
@@ -49,6 +51,8 @@ export const createEdgeEverDocumentExtensions = (
   createEdgeEverTaskItem(),
   options.table === undefined ? TableKit : TableKit.configure(options.table),
   ...withOptional(options.image, Image),
+  ImageAlignmentAttributes,
+  ImageLinkAttributes,
   ...withOptional(options.gallery, ImageGallery),
   ...withOptional(options.pdf, PdfAttachment),
   ...withOptional(options.file, FileAttachment),
@@ -58,6 +62,6 @@ export const createEdgeEverDocumentExtensions = (
   ...options.mathematics,
   MathCodeFence,
   ...(options.markdown
-    ? [Markdown.configure({ markedOptions: { gfm: true } })]
+    ? [Markdown.configure({ marked: createEdgeEverMarked(), markedOptions: { gfm: true } })]
     : []),
 ];

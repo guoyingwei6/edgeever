@@ -1,11 +1,11 @@
 export const plSiteTagline =
-  "Otwartoźródłowa, natywnie wspierająca AI, samodzielnie hostowana alternatywa dla Evernote – wdrożenie w Cloudflare lub Dockerze.";
+  "Natywna dla AI aplikacja do notatek oraz alternatywa dla Evernote/Obsidian z błyskawiczną synchronizacją i natywnym MCP. Bezpłatnie na Cloudflare lub self-hosted przez Docker.";
 
 export const plSiteCopy = {
   layout: {
     defaultDescription:
-      "EdgeEver to otwartoźródłowa, natywnie wspierająca AI baza wiedzy i alternatywa dla Evernote. Klasyczny układ trzech paneli na macOS, Windows, Linux, iOS, Android i w Web Clipper, z natywną współpracą z lokalnymi agentami ACP, paskiem bocznym towarzysza i notatkami z diagramami. Działa w darmowym planie Cloudflare albo w Dockerze.",
-    defaultTitle: "Otwartoźródłowa, samodzielnie hostowana alternatywa dla Evernote | EdgeEver",
+      "EdgeEver to otwartoźródłowa, natywnie wspierająca AI baza wiedzy i nowoczesna przestrzeń do notatek. Klasyczny układ trzech paneli (drzewo katalogów · lista notatek · edytor) na macOS, Windows, Linux, iOS, Android i w Web Clipper, z natywną współpracą z lokalnymi agentami ACP, paskiem bocznym towarzysza i notatkami z diagramami. Działa w darmowym planie Cloudflare albo w Dockerze.",
+    defaultTitle: `EdgeEver - ${plSiteTagline}`,
     imageAlt: "Zrzut ekranu aplikacji do notatek EdgeEver",
     ogLocale: "pl_PL",
   },
@@ -18,10 +18,12 @@ export const plSiteCopy = {
     dockerDeploy: "Docker",
     selfHostedAlternative: "Alternatywa dla Evernote",
     migration: "Migracja z Evernote",
+    noteMigration: "Przewodnik migracji",
     evernoteMigration: "Migracja z Evernote",
     memosMigration: "Migracja z Memos",
     notionMigration: "Migracja z Notion",
     flomoMigration: "Migracja z Flomo",
+    bestPractices: "Prezentacja",
     advancedPlay: "Praca z agentami AI",
     blog: "Blog",
     backToBlog: "Wróć do bloga",
@@ -38,13 +40,15 @@ export const plSiteCopy = {
   },
   hero: {
     slogan: plSiteTagline,
-    popHighlight: "Otwartoźródłowa alternatywa dla Evernote · Natywna współpraca z AI · Aplikacje na wszystkie platformy",
+    popHighlight: "Nowoczesna baza wiedzy w trzech panelach · Natywna współpraca z AI · Aplikacje na wszystkie platformy",
     demo: "Demo na żywo",
     agentInstall: "Wdróż z AI",
     getApps: "Pobierz aplikacje:",
     clipper: "Web Clipper",
     windows: "Windows",
     linux: "Linux",
+    migrationTitle: "Migracja notatek",
+    migrationSubtitle: "Natywny import z Evernote, Obsidian, Joplin oraz migracja z Notion i flomo",
     imageAlt: "Podgląd EdgeEver",
     badgeText:
       "💡 Wszystkie platformy: macOS, Windows, Linux, iOS, Android, Web Clipper · Natywna współpraca z MCP i ACP · Darmowy plan Cloudflare i Docker",
@@ -54,10 +58,11 @@ export const plSiteCopy = {
     heading: "Zbudowany od nowa z myślą o samodzielnym hostingu wiedzy i pracy z AI",
     subheading:
       "Bez reklam, limitów urządzeń i drogich subskrypcji. Każdy szczegół służy szybkiemu, otwartemu i prywatnemu „drugiemu mózgowi”.",
+    showcaseCta: "Zobacz 20 praktycznych scenariuszy i zrzutów ekranu",
     card1: {
       badge: "Klasyczny interfejs",
       title: "Klasyczny układ trzech paneli – szybszy i lżejszy",
-      desc: "Zachowuje drzewo notatników, listę notatek i główny edytor. Przełączaj się swobodnie między tekstem sformatowanym a źródłem Markdown. Nieograniczone zagnieżdżanie, tryb skupienia oraz własne presety CSS dla jasnego i ciemnego motywu.",
+      desc: "Zachowuje wygodny układ trzech paneli (drzewo katalogów · lista notatek · edytor). Przełączaj się swobodnie między tekstem sformatowanym a źródłem Markdown. Nieograniczone zagnieżdżanie, tryb skupienia oraz własne presety CSS dla jasnego i ciemnego motywu.",
       subBadge: "Dwa widoki / Tryb skupienia / Własny CSS",
       treeTitle: "Notatniki",
       folder1: "01_Work_Inbox",
@@ -70,7 +75,7 @@ export const plSiteCopy = {
       note2Title: "Połączenie z lokalnym agentem ACP",
       note2Sub: "Codex / Antigravity lokalnie...",
       editorTitle: "EdgeEver Architecture",
-      editorBody: "EdgeEver łączy klasyczny trzypanelowy układ Evernote ze współpracą z agentami AI i elastycznymi opcjami wdrożenia.",
+      editorBody: "EdgeEver łączy klasyczny trzypanelowy układ ze współpracą z agentami AI i elastycznymi opcjami wdrożenia.",
       editorSaveTag: "Zapisano automatycznie w SQLite",
     },
     card2: {
@@ -113,8 +118,8 @@ export const plSiteCopy = {
     },
   },
   marquee: {
-    title: "Aplikacje na wszystkie platformy, elastyczne wdrożenie i współpraca z AI",
-    subtitle: "Od macOS i natywnych aplikacji iOS i Android, przez samodzielny hosting w Dockerze i kopiowanie ze stylami, po współpracę przez Remote MCP.",
+    title: "Natywna architektura, elastyczny hosting i ekosystem AI",
+    subtitle: "Od lokalnej synchronizacji SQLite i integracji ACP / Remote MCP po hosting Docker oraz formatowanie treści.",
     items: [
       {
         tag: "macOS Desktop",
@@ -212,7 +217,7 @@ export const plSiteCopy = {
       },
       {
         title: "Klasyczne trzy panele, tryb skupienia i wygląd",
-        summary: "Zachowuje drzewo notatników, listę notatek i edytor, obsługując tekst sformatowany, źródło Markdown i własne presety wyglądu.",
+        summary: "Zachowuje układ trzech paneli (drzewo katalogów · lista notatek · edytor), obsługując tekst sformatowany, źródło Markdown i własne presety wyglądu.",
         points: [
           "Nieograniczone zagnieżdżanie notatników dla długoterminowych osobistych baz wiedzy.",
           "Pełnoekranowy tryb skupienia na desktopie, zmiana kolejności notatników przeciąganiem oraz zbiorcze przenoszenie i scalanie notatek.",
@@ -265,10 +270,16 @@ export const plSiteCopy = {
         cta: "Przeczytaj poradnik wdrożenia",
       },
       {
-        title: "Migracja z Evernote",
-        summary: "Użyj EdgeEver MCP, evernote-backup i skryptu importu ENEX, aby przenieść starą bibliotekę notatek do własnej instancji.",
-        href: "/blog/evernote-migration-guide",
+        title: "Migracja z innych aplikacji",
+        summary: "Natywny import z Evernote, Obsidian i Joplin jednym kliknięciem lub migracja z Notion, flomo i Memos za pomocą AI Agent (MCP).",
+        href: "/blog/note-migration-guide",
         cta: "Przeczytaj poradnik migracji",
+      },
+      {
+        title: "20 praktycznych scenariuszy",
+        summary: "Wizualny przegląd pisania w trzech panelach, wycinania treści, diagramów i tabel AI, lokalnych agentów ACP i plakatów.",
+        href: "/guides/best-practices",
+        cta: "Zobacz przykłady",
       },
       {
         title: "Zaawansowana praca z agentami AI",

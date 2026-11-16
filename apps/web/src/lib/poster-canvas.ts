@@ -9,7 +9,6 @@ import {
   Gradient,
   Path,
   Shadow,
-  Point,
   util,
   type FabricObject,
 } from "fabric";
@@ -21,6 +20,8 @@ import {
 } from "@edgeever/shared";
 import { BadgeBox } from "./poster-design/vendor/qiaomu/badge";
 import { loadPosterFont } from "./poster-design/fonts";
+import { grain } from "./poster-design/vendor/qiaomu/kit";
+import { paperListParagraphStyles } from "./poster-design/paper-list-content";
 
 export function makePosterGradient(
   value: PosterPaintGradient,
@@ -88,6 +89,7 @@ export function makePosterGradient(
 export const posterObject = async (
   element: PosterElement,
   readResource: (id: string) => Promise<Blob>,
+  fontsPrepared = false,
 ): Promise<FabricObject> => {
   const options = {
     left: element.x,
@@ -112,6 +114,9 @@ export const posterObject = async (
     cornerSize: 9,
     cornerStyle: "circle" as const,
     transparentCorners: false,
+    // Thin vector shapes must be rasterized at the current drag scale. Stretching
+    // their old bitmap cache magnifies antialiasing far beyond the selection box.
+    noScaleCache: element.type === "text" || element.type === "image",
   };
   const fill = element.gradient
     ? makePosterGradient(element.gradient, element.width, element.height)
@@ -119,12 +124,12 @@ export const posterObject = async (
       ? element.fill
       : undefined;
   if (element.type === "text") {
-    await loadPosterFont(element.fontFamily);
+    if (!fontsPrepared) await loadPosterFont(element.fontFamily, element.text).catch(() => { /* Local default keeps the canvas usable offline. */ });
     const textOptions = {
       ...options,
       width: element.width,
       fontSize: element.fontSize,
-      fontFamily: element.fontFamily,
+      fontFamily: `${element.fontFamily}, "EdgeEver Offline Sans", sans-serif`,
       fontWeight: element.fontWeight,
       fontStyle: element.fontStyle ?? "normal",
       underline: element.underline ?? false,
@@ -133,6 +138,7 @@ export const posterObject = async (
       textAlign: element.textAlign,
       fill,
       splitByGrapheme: true,
+      styles: paperListParagraphStyles(element),
     };
     if (element.badge) {
       const badge = new BadgeBox(element.text, {
@@ -147,7 +153,10 @@ export const posterObject = async (
     }
     return new Textbox(element.text, textOptions);
   }
-  if (element.type === "rect")
+  if (element.type === "rect") {
+    // Reuse the existing deterministic grain tile. The saved layer remains a
+    // normal rect so older readers can still open the document.
+    const paperGrain = element.name === "paper-list:paper:grain" ? grain(element.width, element.height)?.fill : undefined;
     return new Rect({
       ...options,
       width: element.width,
@@ -155,7 +164,9 @@ export const posterObject = async (
       fill,
       rx: element.radius ?? 0,
       ry: element.radius ?? 0,
+      ...(paperGrain ? { fill: paperGrain, globalCompositeOperation: "multiply" as const } : {}),
     });
+  }
   if (element.type === "ellipse")
     return new Ellipse({
       ...options,

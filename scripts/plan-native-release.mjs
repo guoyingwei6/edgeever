@@ -35,6 +35,7 @@ export const planNativeRelease = (platform, changedFiles) => {
             "crates/desktop-sidecar/",
             "migrations/",
             "packages/client/",
+            "packages/image-host/",
             "packages/shared/",
           ];
 
@@ -46,12 +47,13 @@ export const planNativeRelease = (platform, changedFiles) => {
           ".github/workflows/store-delivery.yml",
           "bun.lock",
           "scripts/build-android-local.sh",
+          "apps/desktop/src/main/wechat-chat-transcript.cjs",
           "scripts/download-play-universal-apk.mjs",
           "scripts/verify-android-apk-signature.mjs",
           ...mobileOnlyDependencyPatches,
         ])
       : platform === "ios"
-        ? new Set()
+        ? new Set(["apps/desktop/src/main/wechat-chat-transcript.cjs"])
       : new Set([
           ".cargo/config.toml",
           ".github/workflows/desktop-build.yml",
@@ -67,6 +69,8 @@ export const planNativeRelease = (platform, changedFiles) => {
           "scripts/sign-windows-update-manifest.mjs",
           "scripts/verify-windows-update-release.mjs",
           "scripts/verify-desktop-package.mjs",
+          "scripts/desktop-production-files.mjs",
+          "scripts/verify-desktop-production-runtime.cjs",
           "scripts/verify-desktop-cross-version-startup.mjs",
           "scripts/verify-packaged-desktop-startup.mjs",
           "scripts/verify-renderer-origin-migration.mjs",

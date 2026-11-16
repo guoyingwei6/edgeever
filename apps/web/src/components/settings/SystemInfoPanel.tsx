@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getClientDisplaySizeParts } from "@edgeever/shared";
 import type { DeploymentMetadata } from "@edgeever/shared/deployment-metadata";
-import { Activity, CircleCheck, CircleX, Cloud, Copy, ExternalLink, Info, LoaderCircle, MonitorSmartphone, RefreshCw, RotateCcw } from "lucide-react";
+import { Activity, CircleCheck, CircleX, Cloud, Copy, ExternalLink, Info, LoaderCircle, MonitorSmartphone, RefreshCw, RotateCcw, TriangleAlert } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { ClipboardCopyNotice } from "@/components/ClipboardCopyNotice";
 import { Button } from "@/components/ui/button";
@@ -34,7 +34,7 @@ export type SystemInfoItem = {
   breakAll?: boolean;
 };
 
-type InstanceSystemDiagnostics = Pick<InstanceHealth, "build" | "containerImageSource" | "deployment" | "deploymentVersionCreatedAt" | "migration" | "objectStorageProvider" | "storage"> & {
+type InstanceSystemDiagnostics = Pick<InstanceHealth, "build" | "buildCreatedAt" | "buildProvenance" | "containerImageSource" | "deployment" | "deploymentVersionCreatedAt" | "migration" | "objectStorageProvider" | "storage"> & {
   runtime?: string | null;
 };
 
@@ -80,6 +80,11 @@ const getDeploymentDescription = (
   const method = t(`systemInfo.deploymentMethods.${deployment.method}`);
   return `${trigger} · ${method}`;
 };
+
+const formatInstanceTimestamp = (value: string | null | undefined, language: string) =>
+  value && Number.isFinite(Date.parse(value))
+    ? new Intl.DateTimeFormat(language, { dateStyle: "medium", timeStyle: "short" }).format(new Date(value))
+    : null;
 
 const getContainerImageSourceTranslationKey = (source: string | null | undefined) => {
   if (source === "official-ghcr" || source === "official-cn-mirror" || source === "custom") return source;
@@ -139,6 +144,12 @@ const getWebSystemInfoGroups = (
   const instanceUrl = clientKind === "desktopApp"
     ? (diagnostics.instanceUrl ?? getConfiguredDesktopApiBaseUrl()).trim()
     : "";
+  const clientRuntime = diagnostics.clientRuntime;
+  const architecture = clientRuntime?.architecture;
+  const hasMacArchitectureName = clientRuntime?.desktopPlatform === "darwin" && (architecture === "arm64" || architecture === "x64");
+  const architectureName = hasMacArchitectureName
+    ? t(`systemInfo.macArchitecture.${architecture}`)
+    : architecture ?? t("systemInfo.unknown");
 
   return [
     {
@@ -166,9 +177,7 @@ const getWebSystemInfoGroups = (
         { label: t("systemInfo.instanceBuild"), value: diagnostics.instance?.build ?? t("systemInfo.unknown"), mono: true },
         {
           label: t("systemInfo.deploymentVersionTime"),
-          value: diagnostics.instance?.deploymentVersionCreatedAt && Number.isFinite(Date.parse(diagnostics.instance.deploymentVersionCreatedAt))
-            ? new Intl.DateTimeFormat(language, { dateStyle: "medium", timeStyle: "short" }).format(new Date(diagnostics.instance.deploymentVersionCreatedAt))
-            : t("systemInfo.unknown"),
+          value: formatInstanceTimestamp(diagnostics.instance?.deploymentVersionCreatedAt, language) ?? t("systemInfo.unknown"),
         },
         { label: t("systemInfo.databaseMigration"), value: diagnostics.instance?.migration ?? t("systemInfo.unknown"), mono: true },
         {
@@ -196,10 +205,20 @@ const getWebSystemInfoGroups = (
           value: t(`systemInfo.deploymentPlatforms.${resolveDeploymentPlatform(diagnostics.instance?.runtime)}`),
         },
         ...(diagnostics.instance?.runtime === "self-hosted-bun"
-          ? [{
-              label: t("systemInfo.containerImageSource"),
-              value: t(`systemInfo.containerImageSources.${getContainerImageSourceTranslationKey(diagnostics.instance.containerImageSource)}`),
-            }]
+          ? [
+              {
+                label: t("systemInfo.containerImageSource"),
+                value: t(`systemInfo.containerImageSources.${getContainerImageSourceTranslationKey(diagnostics.instance.containerImageSource)}`),
+              },
+              {
+                label: t("systemInfo.imageBuiltAt"),
+                value: formatInstanceTimestamp(diagnostics.instance.buildCreatedAt, language) ?? t("systemInfo.unknown"),
+              },
+              {
+                label: t("systemInfo.imageBuildSource"),
+                value: getDeploymentDescription(t, resolveSystemInfoDeploymentMetadata(diagnostics.instance.buildProvenance, {}, false)),
+              },
+            ]
           : []),
         { label: t("systemInfo.deployment"), value: getDeploymentDescription(t, deployment), colSpan: "full" },
       ],
@@ -233,9 +252,11 @@ const getWebSystemInfoGroups = (
           value: diagnostics.clientRuntime?.deviceModel ?? t("systemInfo.unknown"),
         },
         {
-          label: t("systemInfo.architecture"),
-          value: diagnostics.clientRuntime?.architecture ?? t("systemInfo.unknown"),
-          mono: true,
+          label: t("systemInfo.clientArchitecture"),
+          value: clientRuntime?.runningUnderRosetta
+            ? t("systemInfo.architectureUnderRosetta", { architecture: architectureName })
+            : architectureName,
+          mono: !hasMacArchitectureName,
         },
         {
           label: t("systemInfo.runtimeEngine"),
@@ -617,6 +638,12 @@ export const SystemInfoPanel = ({ active = true }: { active?: boolean }) => {
               </div>
             ) : null}
             <div className="rounded-lg border border-slate-200/80 bg-card p-3 sm:p-3.5">
+              {isClient && clientRuntimeQuery.data?.runningUnderRosetta ? (
+                <p className="mb-3 flex items-start gap-2 rounded-md bg-amber-50 px-2.5 py-2 text-xs leading-5 text-amber-900" role="status">
+                  <TriangleAlert aria-hidden="true" className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  <span>{t("systemInfo.macArchitectureMismatch")}</span>
+                </p>
+              ) : null}
               <dl className="grid grid-cols-2 gap-x-4 gap-y-2.5 sm:grid-cols-3 sm:gap-x-5">
                 {group.items.map((item) => (
                   <div
@@ -626,7 +653,7 @@ export const SystemInfoPanel = ({ active = true }: { active?: boolean }) => {
                     <dt className="truncate text-xs font-normal text-slate-400">{item.label}</dt>
                     <dd className="mt-0.5 flex min-w-0 items-center gap-1.5">
                       {item.status === "connected" ? (
-                        <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-slate-950" />
+                        <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" />
                       ) : item.status === "connecting" ? (
                         <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500 animate-pulse" />
                       ) : item.status === "failed" ? (

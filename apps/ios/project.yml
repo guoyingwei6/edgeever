@@ -14,6 +14,9 @@ packages:
   Pow:
     url: https://github.com/EmergeTools/Pow
     from: 1.0.0
+  ZIPFoundation:
+    url: https://github.com/weichsel/ZIPFoundation
+    exactVersion: 0.9.20
 settings:
   base:
     SWIFT_VERSION: "5.0"
@@ -42,16 +45,27 @@ targets:
       - path: EdgeEver
         excludes:
           - Resources/Info.plist
+          - Resources/EditorBundle/assets
+      - path: Shared
+      - path: ../desktop/src/main/wechat-chat-transcript.cjs
+        buildPhase: resources
+      - path: EdgeEver/Resources/EditorBundle/assets
+        type: folder
+        buildPhase: resources
     resources:
       - path: EdgeEver/Resources/Assets.xcassets
       - path: EdgeEver/Resources/Localizable.xcstrings
       - path: EdgeEver/Resources/PrivacyInfo.xcprivacy
       - path: EdgeEver/Resources/EditorBundle
+        excludes:
+          - assets
     dependencies:
       - package: GRDB
         product: GRDB
       - package: Pow
         product: Pow
+      - package: ZIPFoundation
+        product: ZIPFoundation
       - target: ShareExtension
     embed:
       - path: ShareExtension.appex
@@ -116,6 +130,9 @@ targets:
       - path: ShareExtension
         excludes:
           - Info.plist
+      - path: Shared
+      - path: EdgeEver/Resources/PrivacyInfo.xcprivacy
+        buildPhase: resources
     settings:
       base:
         # Keep the existing App Store App ID used by the previous RN share extension.

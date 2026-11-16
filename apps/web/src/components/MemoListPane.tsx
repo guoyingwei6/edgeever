@@ -15,6 +15,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
+import { publishImageErrorMessage } from "@/lib/publish-image-host";
 import * as m from "motion/react-m";
 import {
   X,
@@ -27,7 +28,6 @@ import {
   Trash2,
   KeyRound,
   CheckSquare,
-  ArrowDownWideNarrow,
   LayoutList,
   List,
   FileText as FileIcon,
@@ -37,11 +37,7 @@ import {
   Folder,
   Merge,
   FilePlus2,
-  Compass,
-  Layers,
-  Settings,
   MoreVertical,
-  CheckCircle2,
   TagX,
   Image as ImageIcon,
   Share2,
@@ -52,8 +48,10 @@ import {
   Printer,
   Pencil,
   Copy,
+  CopyPlus,
+  ClipboardType,
 } from "lucide-react";
-import { WeChatIcon } from "./WeChatIcon";
+import { IconTooltip } from "./editor/EditorPaneChrome";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -67,6 +65,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { MemoCard } from "./MemoCard";
+import { MemoNotebookSites } from "./MemoNotebookSites";
 import { ClipboardCopyNotice } from "./ClipboardCopyNotice";
 import { WeChatCopyProgress } from "./WeChatCopyProgress";
 import { cn } from "@/lib/utils";
@@ -83,7 +82,6 @@ import type {
   NotebookMoveOption,
 } from "@/lib/app-helpers";
 import { contentEnterMotion, paneEnterMotion } from "@/lib/motion";
-import type { SyncQueueSummary } from "@/lib/sync-queue";
 import { api } from "@/lib/api";
 import { isLocalMemoId } from "@/lib/local-mirror";
 import { copyTextToClipboard } from "@/lib/clipboard";
@@ -350,20 +348,6 @@ const MobileSelectionActionBar = ({
   );
 };
 
-const CheckCircleCheck = ({ className }: { className?: string }) => (
-  <svg
-    className={cn("h-4 w-4 fill-current", className)}
-    viewBox="0 0 20 20"
-    xmlns="http://www.w3.org/2000/svg"
-  >
-    <path
-      fillRule="evenodd"
-      d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
-      clipRule="evenodd"
-    />
-  </svg>
-);
-
 export const MemoListPane = ({
   notebooks,
   notebook,
@@ -405,6 +389,7 @@ export const MemoListPane = ({
   onDeleteSelectedMemos,
   onEmptyTrash,
   onMerge,
+  onDuplicateMemo,
   onEnterSelectionMode,
   onClearSelection,
   onToggleMemo,
@@ -429,11 +414,8 @@ export const MemoListPane = ({
   setMobileMoveOpen,
   mobileMoreOpen,
   setMobileMoreOpen,
-  desktopFilterOpen,
   setDesktopFilterOpen,
-  desktopSortOpen,
   setDesktopSortOpen,
-  desktopActionsOpen,
   setDesktopActionsOpen,
   isLoading,
   isRefreshing,
@@ -476,6 +458,7 @@ export const MemoListPane = ({
   onDeleteMemo: (memoId: string) => void;
   onRestoreMemo: (memoId: string) => void;
   onTogglePinMemo: (memo: MemoSummary) => void;
+  onDuplicateMemo: (memo: MemoSummary) => void;
   onMoveMemo: (memoId: string, notebookId: string) => void;
   onRequestDocumentAction: (memoId: string, action: MemoDocumentAction, printWindow?: Window | null) => void;
   onCopyMemoToWeChat: (memoId: string) => Promise<MemoWeChatCopyResult>;
@@ -535,6 +518,7 @@ export const MemoListPane = ({
   const [moveTargetNotebookId, setMoveTargetNotebookId] = useState("");
   const [memoIdCopyNotice, setMemoIdCopyNotice] = useState<{ status: "copied" | "error"; id: string } | null>(null);
   const [wechatCopyNotice, setWechatCopyNotice] = useState<"copied" | "error" | null>(null);
+  const [wechatCopyError, setWechatCopyError] = useState<string | null>(null);
   const [wechatCopyPending, setWechatCopyPending] = useState(false);
   const wechatCopyPendingRef = useRef(false);
   const wechatCopyNoticeTimerRef = useRef<number | null>(null);
@@ -560,7 +544,6 @@ export const MemoListPane = ({
   const listScrollRef = useRef<HTMLDivElement | null>(null);
   const [listScrollElement, setListScrollElement] = useState<HTMLDivElement | null>(null);
   const [isDesktopList, setIsDesktopList] = useState(isDesktopViewport);
-  const moveTargetSelectRef = useRef<HTMLSelectElement | null>(null);
   const previousSelectionModeRef = useRef(selectionMode);
   const skipSelectedMemoAutoScrollRef = useRef(false);
   const setListScrollNode = useCallback((node: HTMLDivElement | null) => {
@@ -624,8 +607,6 @@ export const MemoListPane = ({
           ? t("workspace.selection.updatingPin")
           : selectionPinLabel;
   const selectionToggleTitle = canToggleVisibleMemoSelection ? visibleSelectionToggleLabel : t("memoList.noSelectableInList");
-  const moveTargetTitle =
-    view === "trash" ? t("workspace.selection.trashCannotMove") : notebooks.length === 0 ? t("workspace.selection.noMovableNotebook") : isMoving ? t("workspace.selection.moving") : t("memoList.moveToNotebook");
   const searchActive = Boolean(search.trim());
   const hasListConstraint = searchActive || filterMode !== "all" || Boolean(selectedTag);
   const activeFilterLabel = filterOptions.find((option) => option.value === filterMode)?.label ?? t("options.memoFilter.all");
@@ -693,15 +674,17 @@ export const MemoListPane = ({
       window.clearTimeout(wechatCopyNoticeTimerRef.current);
     }
     setWechatCopyNotice(null);
+    setWechatCopyError(null);
     setWechatCopyPending(true);
     try {
       const result = await onCopyMemoToWeChat(memo.id);
       if (result === "editor") return;
       setWechatCopyNotice(result);
       wechatCopyNoticeTimerRef.current = window.setTimeout(() => setWechatCopyNotice(null), result === "copied" ? 2200 : 2600);
-    } catch {
+    } catch (error) {
+      setWechatCopyError(publishImageErrorMessage(error));
       setWechatCopyNotice("error");
-      wechatCopyNoticeTimerRef.current = window.setTimeout(() => setWechatCopyNotice(null), 2600);
+      wechatCopyNoticeTimerRef.current = window.setTimeout(() => setWechatCopyNotice(null), 8000);
     } finally {
       wechatCopyPendingRef.current = false;
       setWechatCopyPending(false);
@@ -924,15 +907,7 @@ export const MemoListPane = ({
   };
 
   const openMemoContextMenuAt = (memo: MemoSummary, clientX: number, clientY: number) => {
-    const menuWidth = 224;
-    // Keep enough room for the full action list. Radix can still adjust the
-    // final position, but this prevents the initial placement from starting
-    // below the viewport on short or zoomed desktop viewports.
-    const menuHeight = view === "trash" ? 216 : 392;
-    const x = Math.min(clientX, Math.max(12, window.innerWidth - menuWidth - 12));
-    const y = Math.min(clientY, Math.max(12, window.innerHeight - menuHeight - 12));
-
-    setMemoContextMenu({ memo, x, y });
+    setMemoContextMenu({ memo, x: clientX, y: clientY });
   };
 
   const handleOpenMemoContextMenu = (memo: MemoSummary, event: MouseEvent<HTMLElement>) => {
@@ -952,7 +927,7 @@ export const MemoListPane = ({
     setMemoContextMenu(null);
   };
 
-  const handleOpenSelectionKeyboardContextMenu = (memo: MemoSummary, target: HTMLElement) => {
+  const handleOpenSelectionKeyboardContextMenu = (memo: MemoSummary) => {
     if (!isDesktopViewport()) {
       return;
     }
@@ -1011,26 +986,6 @@ export const MemoListPane = ({
   const handleListDensityChange = (value: MemoListDensity) => {
     setListDensity(value);
     writeMemoListDensityPreference(value);
-  };
-
-  const handleMoveTargetSelectKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>) => {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      event.currentTarget.blur();
-      listRootRef.current?.focus();
-      return;
-    }
-
-    if (event.key !== "Enter") {
-      return;
-    }
-
-    if (selectedMemoIds.size === 0 || !moveTargetNotebookId || isMoving || view === "trash") {
-      return;
-    }
-
-    event.preventDefault();
-    onMoveSelectedMemos(moveTargetNotebookId);
   };
 
   const handleListKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
@@ -1545,7 +1500,7 @@ export const MemoListPane = ({
                       onDelete={() => onDeleteMemo(memo.id)}
                       onOpenContextMenu={(event) => handleOpenMemoContextMenu(memo, event)}
                       onOpenSelectionContextMenu={(event) => handleOpenSelectionContextMenu(memo, event)}
-                      onOpenSelectionKeyboardContextMenu={(target) => handleOpenSelectionKeyboardContextMenu(memo, target)}
+                      onOpenSelectionKeyboardContextMenu={() => handleOpenSelectionKeyboardContextMenu(memo)}
                       onOpenKeyboardContextMenu={(target) => handleOpenMemoKeyboardContextMenu(memo, target)}
                       onToggle={(event) => handleToggleMemo(memo.id, event)}
                     />
@@ -1568,12 +1523,18 @@ export const MemoListPane = ({
         <div style={{ position: "fixed", left: memoContextMenu.x, top: memoContextMenu.y, zIndex: 100 }}>
           <DropdownMenu modal={false} open={true} onOpenChange={(open) => { if (!open) setMemoContextMenu(null); }}>
             <DropdownMenuTrigger asChild>
-              <span className="sr-only" />
+              <span className="block h-0 w-0" />
             </DropdownMenuTrigger>
             <DropdownMenuContent
+              // A side anchor lets Radix shift the full menu vertically using
+              // its measured height, even when neither side of the click fits.
+              side="right"
+              sideOffset={0}
               align="start"
+              sticky="always"
+              collisionPadding={12}
               onCloseAutoFocus={(event) => event.preventDefault()}
-              className="max-h-[calc(100dvh-1.5rem)] w-56 max-w-[calc(100vw-1.5rem)] overflow-y-auto bg-card border border-slate-200 rounded-md py-1 shadow-md duration-0 data-[state=open]:animate-none data-[state=closed]:animate-none"
+              className="max-h-[min(calc(100dvh-1.5rem),var(--radix-dropdown-menu-content-available-height))] w-56 max-w-[calc(100vw-1.5rem)] overflow-y-auto bg-card border border-slate-200 rounded-md py-1 shadow-md duration-0 data-[state=open]:animate-none data-[state=closed]:animate-none"
               data-memo-actions-menu
             >
               <DropdownMenuItem
@@ -1656,7 +1617,7 @@ export const MemoListPane = ({
                       <Folder className="h-4 w-4" />
                       <span className="min-w-0 flex-1 truncate">{t("memoList.moveToNotebook")}</span>
                     </DropdownMenuSubTrigger>
-                    <DropdownMenuSubContent className="max-h-64 w-56 overflow-y-auto">
+                    <DropdownMenuSubContent collisionPadding={12} sticky="always" className="max-h-[min(16rem,var(--radix-dropdown-menu-content-available-height))] w-56 overflow-y-auto">
                       {moveNotebookOptions.map((option) => (
                         <DropdownMenuItem
                           key={option.id}
@@ -1678,6 +1639,20 @@ export const MemoListPane = ({
                       ))}
                     </DropdownMenuSubContent>
                   </DropdownMenuSub>
+                  {canCreateMemo && view !== "trash" && (
+                    <DropdownMenuItem
+                      className="flex h-9 w-full items-center gap-2 px-3 text-left text-xs text-slate-700 hover:bg-slate-50 cursor-pointer outline-none"
+                      disabled={isLocalMemoId(memoContextMenu.memo.id)}
+                      onClick={() => {
+                        const { memo } = memoContextMenu;
+                        setMemoContextMenu(null);
+                        onDuplicateMemo(memo);
+                      }}
+                    >
+                      <CopyPlus className="h-4 w-4 text-slate-500" />
+                      {t("editor.duplicate")}
+                    </DropdownMenuItem>
+                  )}
                   <DropdownMenuSeparator className="my-1 h-px bg-slate-100" />
                   <DropdownMenuItem
                     className="flex h-9 w-full items-center gap-2 px-3 text-left text-xs text-slate-700 hover:bg-slate-50 cursor-pointer outline-none"
@@ -1687,14 +1662,21 @@ export const MemoListPane = ({
                     {contextShareQuery.data?.share ? <Globe className="h-4 w-4 text-slate-950" /> : <Share2 className="h-4 w-4 text-slate-500" />}
                     {t(isLocalMemoId(memoContextMenu.memo.id) ? "sharing.afterSync" : contextShareQuery.data?.share ? "sharing.manage" : "sharing.action")}
                   </DropdownMenuItem>
+                  {!isLocalMemoId(memoContextMenu.memo.id) && <MemoNotebookSites key={memoContextMenu.memo.id} memoId={memoContextMenu.memo.id} presentation="menu" />}
                   {!memoContextMenu.memo.diagramKind && !memoContextMenu.memo.structuredTable && !memoContextMenu.memo.infographic && !memoContextMenu.memo.poster && (
-                    <DropdownMenuItem
-                      className="flex h-9 w-full items-center gap-2 px-3 text-left text-xs text-slate-700 hover:bg-slate-50 cursor-pointer outline-none"
-                      onClick={() => void handleCopyContextMemoToWeChat()}
+                    <IconTooltip
+                      side="right"
+                      contentClassName="z-[110] max-w-xs whitespace-normal"
+                      label={t("editor.copyToWeChatTooltip")}
                     >
-                      <WeChatIcon className="h-4 w-4 text-slate-500" />
-                      {t("editor.copyToWeChat")}
-                    </DropdownMenuItem>
+                      <DropdownMenuItem
+                        className="flex h-9 w-full items-center gap-2 px-3 text-left text-xs text-slate-700 hover:bg-slate-50 cursor-pointer outline-none"
+                        onClick={() => void handleCopyContextMemoToWeChat()}
+                      >
+                        <ClipboardType className="h-4 w-4 text-slate-500" />
+                        {t("editor.copyToWeChat")}
+                      </DropdownMenuItem>
+                    </IconTooltip>
                   )}
                   <DropdownMenuItem
                     className="flex h-9 w-full items-center gap-2 px-3 text-left text-xs text-slate-700 hover:bg-slate-50 cursor-pointer outline-none"
@@ -1761,7 +1743,7 @@ export const MemoListPane = ({
 
       {wechatCopyNotice && (
         <ClipboardCopyNotice status={wechatCopyNotice}>
-          {t(wechatCopyNotice === "copied" ? "editor.copiedToWeChat" : "editor.copyToWeChatFailed")}
+          {wechatCopyNotice === "error" && wechatCopyError ? wechatCopyError : t(wechatCopyNotice === "copied" ? "editor.copiedToWeChatNotice" : "editor.copyToWeChatFailed")}
         </ClipboardCopyNotice>
       )}
 

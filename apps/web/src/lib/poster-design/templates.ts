@@ -4,6 +4,7 @@ import {
   Ellipse,
   FabricObject,
   Gradient,
+  Group,
   Line,
   Path,
   Pattern,
@@ -24,7 +25,13 @@ import { resolvePair, usePairing } from "./vendor/qiaomu/typeset";
 import { POSTER_FONTS, loadDesignFonts } from "./fonts";
 import { matchesImageSlot, type ImageSlot } from "../poster-image-replacement";
 import { composePosterTemplate, posterTemplateHeaderHeight } from "../poster-template-content";
+import {
+  paperListCurrentCopy,
+  posterTemplateSampleCopy,
+  posterTemplateSelectionCopy,
+} from "./paper-list-content";
 export { PLATFORMS, platformFor } from "./vendor/qiaomu/platforms";
+export { posterTemplateSampleCopy };
 export const DESIGN_TEMPLATES = TEMPLATES;
 export { templatesFor };
 const hex = (color: string | undefined) =>
@@ -85,7 +92,7 @@ export function posterPrimitiveFromObject(
   const pos = object.getPointByOrigin("left", "top");
   const options = {
     id: `design_${index}`,
-    name: role,
+    name: (object as FabricObject & { qcName?: string }).qcName ?? role,
     role,
     x: pos.x,
     y: pos.y,
@@ -174,7 +181,7 @@ export function posterPrimitiveFromObject(
   return { ...options, type: "path", path, fill: paint(object) };
 }
 export function posterCopy(document: PosterDocument) {
-  if (document.copy) return document.copy;
+  if (document.copy) return paperListCurrentCopy(document, document.copy);
   const text = document.elements.filter((element) => element.type === "text");
   const title =
     text.find(
@@ -202,26 +209,41 @@ export async function buildPosterDesign(input: {
   zh: boolean;
   palette?: { bg?: string; ink?: string; accent?: string };
 }): Promise<PosterDocument> {
-  await loadDesignFonts(input.zh);
   const template =
     TEMPLATES.find((entry) => entry.id === input.id) ?? TEMPLATES[0]!;
-  usePairing(
-    input.zh
+  const pairing = input.zh
       ? resolvePair(template.id, (family) =>
           POSTER_FONTS.some((font) => font.family === family),
         )
       : {
           title:
-            template.id === "newspaper" || template.id === "folio"
+            template.id === "newspaper" || template.id === "folio" || template.id === "paper-list"
               ? "DM Serif Display"
               : "Inter",
           body: "Inter",
           titleBold: true,
           missing: [],
-        },
-  );
+        };
+  await loadDesignFonts([pairing.title, pairing.body, "DM Serif Display"].filter((family): family is string => Boolean(family)), [input.title, input.subtitle, input.badge, ...(input.points ?? []), "No. 01 2026"].join(" "));
+  const build = () => {
+    usePairing(pairing);
+    try { return template.build({ ...input }); }
+    finally { usePairing(undefined); }
+  };
+  // Explicit families and fixed template labels may differ from the main pairing.
+  // Load those before the final build so wrapping uses the actual glyph metrics.
+  const initial = build();
+  const texts: Array<{ family: string; text: string }> = [];
+  const collect = (objects: FabricObject[]) => {
+    for (const object of objects) {
+      if ("fontFamily" in object && typeof object.fontFamily === "string" && "text" in object && typeof object.text === "string") texts.push({ family: object.fontFamily, text: object.text });
+      if (object instanceof Group) collect(object.getObjects());
+    }
+  };
+  collect(initial.objects);
+  await loadDesignFonts(texts.map(object => object.family), texts.map(object => object.text).join(" "));
   try {
-    const built = template.build({ ...input });
+    const built = build();
     const elements = built.objects
       .map(posterPrimitiveFromObject)
       .filter((value): value is PosterElement => Boolean(value));
@@ -263,11 +285,12 @@ export async function buildPosterDesign(input: {
   }
 }
 
-export async function applyPosterDesign(document: PosterDocument, templateId: string, zh: boolean, width = document.width, height = document.height) {
+export async function applyPosterDesign(document: PosterDocument, templateId: string, zh: boolean, width = document.width, height = document.height, starterCopy?: { title: string; subtitle: string }) {
   if (!TEMPLATES.some(template => template.id === templateId)) throw new Error("Unknown poster template");
   if (document.elements.some(element => element.locked)) throw new Error("Locked poster elements");
   const headerHeight = posterTemplateHeaderHeight(document, height);
-  const cover = await buildPosterDesign({ id: templateId, ...posterCopy(document), width, height: Math.max(320, headerHeight), zh });
+  const copy = posterTemplateSelectionCopy(document, posterCopy(document), templateId, zh, starterCopy);
+  const cover = await buildPosterDesign({ id: templateId, ...copy, width, height: Math.max(320, headerHeight), zh });
   return composePosterTemplate(document, cover, width, height, headerHeight);
 }
 

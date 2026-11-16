@@ -1,5 +1,7 @@
 'use dom';
 
+import { prepareNoteImageAssets } from "@edgeever/shared/note-image-fonts";
+import { noteImageAssetUrls } from "./note-image-asset-urls";
 import "katex/dist/katex.min.css";
 import { attachMobileReaderScroll } from "../lib/mobile-reader-scroll";
 import { Graph } from "@antv/x6";
@@ -29,6 +31,7 @@ import {
   markdownToDoc,
   MEMO_CONTENT_STYLE,
   createEdgeEverDocumentExtensions,
+  applyImageAlignment,
   DETAILS_EDITOR_CSS,
   wrapDetailsContentHtml,
   NativeAttachmentMetadata,
@@ -69,11 +72,14 @@ import {
   getMobileEditorInputAttributes,
   getMobileEditorImageScaleLabel,
   getMobileEditorImageWidthPresetLabel,
+  getMobileEditorCopy,
+  type MobileEditorLocale,
   getMobileEditorPlaceholder,
   getMobileEditorToolbarActionLabel,
   getMobileEditorToolbarLabel,
   type MobileEditorToolbarActionId,
 } from "@edgeever/shared/mobile-editor";
+import { formatAiPartList, type AiDraftIncompleteReason } from "@edgeever/shared/ai-generation";
 import {
   type NoteImageTheme,
   type NoteImageFontStyle,
@@ -86,6 +92,7 @@ import {
   buildImageExportBasename,
   buildNoteImageCardMarkup,
   generateCardCss,
+  prepareNoteImageContent,
 } from "@edgeever/shared/note-image-card";
 import { useDOMImperativeHandle, type DOMImperativeFactory, type DOMProps } from "expo/dom";
 import { toCanvas } from "html-to-image";
@@ -146,7 +153,7 @@ type LocalTiptapEditorSharedProps = {
   onReaderScroll?: (collapsed: boolean) => Promise<void>;
   onImageExportEvent?: (payloadJson: string) => Promise<void>;
   ref: Ref<LocalTiptapEditorRef>;
-  locale: "zh-CN" | "en-US" | "ja" | "pl";
+  locale: MobileEditorLocale;
   theme: "light" | "dark";
   /** Live-switchable. The same DomWebView stays mounted across viewer → editor. */
   mode?: "editor" | "viewer";
@@ -228,6 +235,14 @@ type MobileAiPanelState = {
   error: string | null;
   generating: boolean;
   requestId: string | null;
+  /**
+   * Why the draft is incomplete; an incomplete draft must not replace the selection (#652).
+   * A new request starts as "interrupted" and only a clean finish clears it.
+   */
+  incomplete?: AiDraftIncompleteReason | null;
+  /** The part a long run is working on, and the parts that kept their source text (#652). */
+  progress?: { part: number; parts: number } | null;
+  incompleteParts?: number[];
 };
 
 type MobileAiBridgePayload = {
@@ -299,6 +314,32 @@ const buildImageResourceTargetJson = (figure: HTMLElement): string | null => {
   } satisfies EditorResourceTarget);
 };
 
+const buildMobileImagePreviewPayload = (figure: HTMLElement): string => {
+  const source = figure.dataset.resourceHref ?? "";
+  const alt = figure.dataset.resourceFilename || "";
+  const allFigures = typeof document !== "undefined"
+    ? Array.from(document.querySelectorAll<HTMLElement>("figure.edgeever-image-node[data-resource-href]"))
+    : [];
+  const images = allFigures
+    .map((fig) => ({
+      alt: fig.dataset.resourceFilename || "",
+      source: fig.dataset.resourceHref || "",
+    }))
+    .filter((img) => Boolean(img.source));
+
+  let index = allFigures.indexOf(figure);
+  if (index < 0 && source) {
+    index = images.findIndex((img) => img.source === source);
+  }
+
+  return JSON.stringify({
+    alt,
+    source,
+    index: Math.max(0, index),
+    images: images.length > 0 ? images : [{ alt, source }],
+  });
+};
+
 const handleMobileResourceEvent = (
   event: Event,
   onResourcePress?: (targetJson: string) => Promise<void>,
@@ -338,38 +379,11 @@ const handleMobileResourceEvent = (
   if (options?.allowImagePreview && options.onImagePreview && !imageActionRequested) {
     event.preventDefault();
     event.stopPropagation();
-    void options.onImagePreview(JSON.stringify({
-      alt: imageFigure.dataset.resourceFilename || "",
-      source: imageHref,
-    }));
+    void options.onImagePreview(buildMobileImagePreviewPayload(imageFigure));
     return true;
   }
 
   return false;
-};
-
-let beautifulMermaidRuntime: Promise<typeof import("beautiful-mermaid")> | null = null;
-
-const loadBeautifulMermaid = () => {
-  beautifulMermaidRuntime ??= import("beautiful-mermaid");
-  return beautifulMermaidRuntime;
-};
-
-const renderWithBeautifulMermaid = async (source: string, theme: "light" | "dark") => {
-  try {
-    const { renderMermaidSVG, THEMES } = await loadBeautifulMermaid();
-    return renderMermaidSVG(source, {
-      ...THEMES[theme === "dark" ? "zinc-dark" : "zinc-light"],
-      transparent: true,
-      font: "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif",
-      padding: 12,
-      nodeSpacing: 16,
-      layerSpacing: 28,
-      componentSpacing: 16,
-    });
-  } catch {
-    return null;
-  }
 };
 
 export default function LocalTiptapEditor(props: LocalTiptapEditorProps | MermaidRendererProps) {
@@ -393,30 +407,11 @@ const MermaidRenderRuntime = (props: MermaidRendererProps) => {
         sources = [];
       }
 
-      const mermaid = await loadMermaid();
-      mermaid.initialize({
-        startOnLoad: false,
-        securityLevel: "strict",
-        suppressErrorRendering: true,
-        theme: "base",
-        themeVariables: getMobileMermaidThemeVariables(props.theme),
-        flowchart: { htmlLabels: false },
-      });
-
       const results: Array<{ source: string; svg: string | null }> = [];
       for (const source of sources) {
+        if (cancelled) return;
         try {
-          const beautifulSvg = await renderWithBeautifulMermaid(source, props.theme);
-          if (beautifulSvg) {
-            results.push({ source, svg: inlineMermaidSvgStyles(beautifulSvg) });
-            continue;
-          }
-          const valid = await mermaid.parse(source, { suppressErrors: true });
-          if (!valid) {
-            throw new Error("Invalid Mermaid diagram");
-          }
-          mermaidRenderSequence += 1;
-          const { svg } = await mermaid.render(`edgeever-mobile-mermaid-${mermaidRenderSequence}`, source);
+          const { svg } = await renderMobileMermaid(source, props.theme, false);
           results.push({ source, svg: inlineMermaidSvgStyles(svg) });
         } catch {
           results.push({ source, svg: null });
@@ -449,7 +444,7 @@ const ReadOnlyX6Diagram = ({
   theme,
 }: {
   diagram: DiagramDocument;
-  locale: "zh-CN" | "en-US" | "ja" | "pl";
+  locale: MobileEditorLocale;
   theme: "light" | "dark";
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -497,9 +492,11 @@ const ReadOnlyX6Diagram = ({
     };
   }, [diagram, theme, locale]);
 
-  const title = locale !== "zh-CN"
-    ? diagram.kind === "mind-map" ? "Mind map" : diagram.kind === "architecture" ? "Architecture diagram" : "Flowchart"
-    : diagram.kind === "mind-map" ? "思维导图" : diagram.kind === "architecture" ? "架构图" : "流程图";
+  const title = diagram.kind === "mind-map"
+    ? getMobileEditorCopy(locale).diagram.mindMap
+    : diagram.kind === "architecture"
+      ? getMobileEditorCopy(locale).diagram.architecture
+      : getMobileEditorCopy(locale).diagram.flowchart;
   return (
     <section className="edgeever-x6-document">
       <div aria-label={title} className="edgeever-x6-diagram" key={diagram.kind} ref={containerRef} role="img" />
@@ -694,9 +691,8 @@ function LocalTiptapEditorImpl(props: LocalTiptapEditorProps) {
             parameterKind: "none",
             resultMode: "both",
             output: "",
-            error: props.locale !== "zh-CN"
-              ? "The selected prompt no longer exists. Choose another prompt."
-              : "所选指令已不存在，请重新选择。",
+            incomplete: null,
+            error: getMobileEditorCopy(props.locale).ai.promptMissing,
           };
         }
         return {
@@ -934,7 +930,7 @@ function LocalTiptapEditorImpl(props: LocalTiptapEditorProps) {
     insertImageUploadPlaceholder(
       editor,
       createMobileImageUploadPlaceholderSource(uploadIdValue),
-      props.locale !== "zh-CN" ? "Uploading image…" : "图片上传中…",
+      getMobileEditorCopy(props.locale).image.uploading,
       previewDataUrlValue,
       pendingImageSelectionRef.current
     );
@@ -984,7 +980,7 @@ function LocalTiptapEditorImpl(props: LocalTiptapEditorProps) {
       type: "paragraph",
       content: [{
         type: "text",
-        text: `${props.locale !== "zh-CN" ? "Attachment: " : "附件："}${filenameValue}`,
+        text: `${getMobileEditorCopy(props.locale).attachmentPrefix}${filenameValue}`,
         marks: [{
           type: "link",
           attrs: {
@@ -1026,7 +1022,7 @@ function LocalTiptapEditorImpl(props: LocalTiptapEditorProps) {
     editor.view.dispatch(editor.state.tr.replaceWith(
       range.from,
       range.to,
-      editor.schema.text(`${props.locale !== "zh-CN" ? "Attachment: " : "附件："}${filenameValue}`, [linkMark])
+      editor.schema.text(`${getMobileEditorCopy(props.locale).attachmentPrefix}${filenameValue}`, [linkMark])
     ));
   }, [editor, props.locale]);
 
@@ -1100,6 +1096,7 @@ function LocalTiptapEditorImpl(props: LocalTiptapEditorProps) {
       customInstruction: "",
       refineInstruction: "",
       output: "",
+      incomplete: null,
       error: null,
       generating: false,
       requestId: null,
@@ -1133,6 +1130,9 @@ function LocalTiptapEditorImpl(props: LocalTiptapEditorProps) {
     setAiPanel((current) => current ? {
       ...current,
       output: "",
+      incomplete: "interrupted",
+      progress: null,
+      incompleteParts: [],
       error: null,
       generating: true,
       requestId,
@@ -1152,7 +1152,8 @@ function LocalTiptapEditorImpl(props: LocalTiptapEditorProps) {
         ...current,
         generating: false,
         requestId: null,
-        error: requestError instanceof Error ? requestError.message : (props.locale !== "zh-CN" ? "AI generation failed." : "AI 生成失败。"),
+        incomplete: current.incomplete === "stopped" ? "stopped" : "interrupted",
+        error: requestError instanceof Error ? requestError.message : getMobileEditorCopy(props.locale).ai.generationFailed,
       } : current);
     });
   }, [aiPanel, props.locale]);
@@ -1167,11 +1168,33 @@ function LocalTiptapEditorImpl(props: LocalTiptapEditorProps) {
         if (payload.event.type === "text-delta") {
           return { ...current, output: current.output + payload.event.text };
         }
+        if (payload.event.type === "text-reset") {
+          return { ...current, output: payload.event.text };
+        }
+        if (payload.event.type === "progress") {
+          return { ...current, progress: { part: payload.event.part, parts: payload.event.parts } };
+        }
         if (payload.event.type === "error") {
-          return { ...current, generating: false, requestId: null, error: payload.event.message };
+          // Text that arrived before the error stays an incomplete draft.
+          return {
+            ...current,
+            generating: false,
+            requestId: null,
+            incomplete: "interrupted",
+            // An interrupted stream is explained by the incomplete notice instead.
+            error: payload.event.code === "ai_stream_interrupted" ? null : payload.event.message,
+          };
         }
         if (payload.event.type === "finish") {
-          return { ...current, generating: false, requestId: null };
+          const incompleteParts = payload.event.incompleteParts ?? [];
+          return {
+            ...current,
+            generating: false,
+            requestId: null,
+            progress: null,
+            incompleteParts,
+            incomplete: payload.event.truncated || incompleteParts.length ? "truncated" : null,
+          };
         }
         return current;
       });
@@ -1183,7 +1206,12 @@ function LocalTiptapEditorImpl(props: LocalTiptapEditorProps) {
   const stopAiSelectionRequest = useCallback(() => {
     if (!aiPanel?.requestId) return;
     void (onAiCancelRef.current ?? ignoreAiRequest)(aiPanel.requestId);
-    setAiPanel((current) => current ? { ...current, generating: false, requestId: null } : current);
+    setAiPanel((current) => current ? {
+      ...current,
+      generating: false,
+      requestId: null,
+      incomplete: current.output ? "stopped" : null,
+    } : current);
   }, [aiPanel?.requestId]);
 
   const applyAiSelectionDraft = useCallback((mode: "append" | "replace") => {
@@ -1192,14 +1220,13 @@ function LocalTiptapEditorImpl(props: LocalTiptapEditorProps) {
     if (!isAiSelectionSnapshotCurrent(aiPanel.selection, currentDocument, editor.state.doc.content.size)) {
       setAiPanel((current) => current ? {
         ...current,
-        error: props.locale !== "zh-CN"
-          ? "The selection expired because the note changed. Select the text again."
-          : "笔记内容已变化，选区已失效，请重新选择文本。",
+        error: getMobileEditorCopy(props.locale).ai.selectionExpired,
       } : current);
       return;
     }
     if (mode === "append" && aiPanel.resultMode === "replace") return;
     if (mode === "replace" && aiPanel.resultMode === "append") return;
+    if (mode === "replace" && aiPanel.incomplete) return;
     const replacementDraft = mode === "replace"
       ? normalizeAiSelectionReplacement(aiPanel.output)
       : aiPanel.output;
@@ -1246,8 +1273,9 @@ function LocalTiptapEditorImpl(props: LocalTiptapEditorProps) {
 
     const notify = (payload: Record<string, unknown>) =>
       onImageExportEventRef.current?.(JSON.stringify({ requestId: request.requestId, ...payload }));
+    const exportStartedAt = performance.now();
     const reportProgress = (stage: "prepare" | "render" | "transfer") => {
-      void Promise.resolve(notify({ type: "progress", stage })).catch(() => {});
+      void Promise.resolve(notify({ type: "progress", stage, elapsedMs: Math.round(performance.now() - exportStartedAt) })).catch(() => {});
     };
     const missingImagePlaceholder = "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=";
 
@@ -1267,6 +1295,7 @@ function LocalTiptapEditorImpl(props: LocalTiptapEditorProps) {
         if (element instanceof HTMLButtonElement) element.remove();
       });
 
+      prepareNoteImageContent(editorClone);
       const bodyHtml = editorClone.innerHTML;
 
       const host = document.createElement("div");
@@ -1282,7 +1311,7 @@ function LocalTiptapEditorImpl(props: LocalTiptapEditorProps) {
         bodyHtml,
         theme: resolvedTheme,
         fontStyle,
-        showTitle: request.showTitle ?? true,
+        showTitle: request.showTitle ?? false,
         showNotebook: request.showNotebook ?? false,
         showTags: request.showTags ?? false,
         showUpdatedAt: request.showUpdatedAt ?? true,
@@ -1299,6 +1328,11 @@ function LocalTiptapEditorImpl(props: LocalTiptapEditorProps) {
       document.body.appendChild(host);
 
       try {
+        await notify({ type: "font-status", status: "loading" });
+        const assets = await prepareNoteImageAssets({ theme: resolvedTheme, fontStyle, text: [request.title, request.notebook, ...(request.tags || []), request.updatedAt, bodyHtml].join(" "), urls: noteImageAssetUrls });
+        await notify({ type: "font-status", status: assets.fontFallback ? "fallback" : "ready" });
+        void assets.fontsReady?.then(() => notify({ type: "fonts-ready" }), () => {}).catch(() => {});
+        style.textContent = assets.css + generateCardCss({ theme: resolvedTheme, fontStyle, fontSize, cardWidth });
         const images = Array.from(documentRoot.querySelectorAll<HTMLImageElement>("img"));
         await Promise.race([
           Promise.all([
@@ -1344,7 +1378,7 @@ function LocalTiptapEditorImpl(props: LocalTiptapEditorProps) {
             }
           },
           pixelRatio: renderPlan.pixelRatio,
-          skipFonts: true,
+          fontEmbedCSS: assets.fontCss,
           width,
         });
         let canvas: HTMLCanvasElement;
@@ -1389,6 +1423,7 @@ function LocalTiptapEditorImpl(props: LocalTiptapEditorProps) {
         }
         await notify({
           type: "complete",
+          fontFallback: assets.fontFallback,
           filename,
           mimeType,
           width: canvas.width,
@@ -1718,9 +1753,9 @@ function LocalTiptapEditorImpl(props: LocalTiptapEditorProps) {
                 disabled={(action.id === "undo" && ((historyState ?? 0) & 1) === 0)
                   || (action.id === "redo" && ((historyState ?? 0) & 2) === 0)
                   || (action.id === "increaseListIndent"
-                    && !Boolean(editor?.can().chain().focus().sinkListItem(activeListItemType).run()))
+                    && !editor?.can().chain().focus().sinkListItem(activeListItemType).run())
                   || (action.id === "decreaseListIndent"
-                    && !Boolean(editor?.can().chain().focus().liftListItem(activeListItemType).run()))}
+                    && !editor?.can().chain().focus().liftListItem(activeListItemType).run())}
                 icon={toolbarIcons[action.id]}
                 label={getMobileEditorToolbarActionLabel(action.id, props.locale)}
                 onRun={toolbarHandlers[action.id]}
@@ -1728,7 +1763,7 @@ function LocalTiptapEditorImpl(props: LocalTiptapEditorProps) {
             ))}
           {onAiRequestRef.current ? (
             <button
-              aria-label={props.locale !== "zh-CN" ? "Use AI on the note or selected text" : "用 AI 处理正文或选中内容"}
+              aria-label={getMobileEditorCopy(props.locale).ai.openForNote}
               className="edgeever-ai-toolbar-button"
               onClick={requestOpenAiForSelection}
               onMouseDown={(event) => event.preventDefault()}
@@ -1749,7 +1784,7 @@ function LocalTiptapEditorImpl(props: LocalTiptapEditorProps) {
       )}
       {aiSelectionTrigger && !aiPanel ? (
         <button
-          aria-label={props.locale !== "zh-CN" ? "Use AI on selected text" : "用 AI 处理选中内容"}
+          aria-label={getMobileEditorCopy(props.locale).ai.openForSelection}
           className="edgeever-ai-selection-trigger"
           onClick={requestOpenAiForSelection}
           onMouseDown={(event) => event.preventDefault()}
@@ -1763,14 +1798,14 @@ function LocalTiptapEditorImpl(props: LocalTiptapEditorProps) {
       ) : null}
       {aiSelectionHint ? (
         <div aria-live="polite" className="edgeever-ai-selection-hint" role="status">
-          {props.locale !== "zh-CN" ? "Add some note content first." : "请先输入正文内容。"}
+          {getMobileEditorCopy(props.locale).ai.emptyNote}
         </div>
       ) : null}
       {aiUndoFingerprint && !aiPanel ? (
         <div aria-live="polite" className="edgeever-ai-undo" role="status">
-          <span>{props.locale !== "zh-CN" ? "AI updated the selection." : "AI 已更新选中内容。"}</span>
+          <span>{getMobileEditorCopy(props.locale).ai.selectionUpdated}</span>
           <button onClick={undoAiSelectionDraft} onMouseDown={(event) => event.preventDefault()} type="button">
-            {props.locale !== "zh-CN" ? "Undo" : "撤销"}
+            {getMobileEditorCopy(props.locale).actions.undo}
           </button>
         </div>
       ) : null}
@@ -1816,7 +1851,7 @@ const MobileSelectionAiPanel = ({
   panel,
   prompts,
 }: {
-  locale: "zh-CN" | "en-US" | "ja" | "pl";
+  locale: MobileEditorLocale;
   onApply: (mode: "append" | "replace") => void;
   onChange: Dispatch<SetStateAction<MobileAiPanelState | null>>;
   onClose: () => void;
@@ -1826,45 +1861,14 @@ const MobileSelectionAiPanel = ({
   panel: MobileAiPanelState;
   prompts: AiPromptTemplate[];
 }) => {
-  const english = locale !== "zh-CN";
   const [picker, setPicker] = useState<MobileAiPickerKind | null>(null);
-  const actionLabels: Record<AiAction, string> = {
-    summarize: english ? "Summarize" : "精简总结",
-    "extract-key-points": english ? "Key points" : "提炼要点",
-    "extract-todos": english ? "Extract tasks" : "提取待办",
-    "rewrite-proofread": english ? "Rewrite & proofread" : "改写与校对",
-    translate: english ? "Translate" : "全文翻译",
-    "improve-writing": english ? "Polish" : "润色表达",
-    "fix-spelling-grammar": english ? "Fix spelling & grammar" : "修正拼写与语法",
-    "make-shorter": english ? "Make concise" : "精炼表达",
-    "make-longer": english ? "Make longer" : "扩写内容",
-    "simplify-language": english ? "Simplify language" : "简化表达",
-    "change-tone": english ? "Change tone" : "调整语气",
-    "continue-writing": english ? "Continue writing" : "继续写作",
-    custom: english ? "Custom prompt" : "自定义指令",
-  };
-  const languageLabels: Record<AiTargetLanguage, string> = {
-    en: english ? "English" : "英语",
-    "zh-CN": english ? "Simplified Chinese" : "简体中文",
-    "zh-TW": english ? "Traditional Chinese" : "繁体中文",
-    ja: english ? "Japanese" : "日语",
-    ko: english ? "Korean" : "韩语",
-    es: english ? "Spanish" : "西班牙语",
-    fr: english ? "French" : "法语",
-    de: english ? "German" : "德语",
-    pt: english ? "Portuguese" : "葡萄牙语",
-    pl: english ? "Polish" : "波兰语",
-  };
-  const toneLabels: Record<AiTone, string> = {
-    professional: english ? "Professional" : "专业",
-    friendly: english ? "Friendly" : "友好",
-    casual: english ? "Casual" : "轻松",
-    direct: english ? "Direct" : "直接",
-  };
+  const actionLabels: Record<AiAction, string> = getMobileEditorCopy(locale).ai.actions;
+  const languageLabels: Record<AiTargetLanguage, string> = getMobileEditorCopy(locale).ai.languages;
+  const toneLabels: Record<AiTone, string> = getMobileEditorCopy(locale).ai.tones;
   const update = (next: Partial<MobileAiPanelState>) => onChange((current) => current ? { ...current, ...next } : current);
   const generateDisabled = panel.generating || (!panel.promptId && panel.action === "custom" && !panel.customInstruction.trim());
   const appendDisabled = panel.generating || !panel.output || panel.resultMode === "replace";
-  const replaceDisabled = panel.generating || !panel.output || panel.resultMode === "append";
+  const replaceDisabled = panel.generating || !panel.output || panel.resultMode === "append" || Boolean(panel.incomplete);
   const selectedPrompt = panel.promptId ? prompts.find((prompt) => prompt.id === panel.promptId) ?? null : null;
 
   const persistLastAction = (
@@ -1898,6 +1902,7 @@ const MobileSelectionAiPanel = ({
         parameterKind: prompt.parameterKind,
         resultMode: prompt.resultMode,
         output: "",
+        incomplete: null,
         error: null,
       });
       return;
@@ -1910,6 +1915,7 @@ const MobileSelectionAiPanel = ({
       parameterKind: fallbackPromptParameterKind(action),
       resultMode: fallbackPromptResultMode(action),
       output: "",
+      incomplete: null,
       error: null,
     });
   };
@@ -1944,22 +1950,22 @@ const MobileSelectionAiPanel = ({
         : [];
 
   const pickerTitle = picker === "action"
-    ? (english ? "Choose an action" : "选择处理方式")
+    ? getMobileEditorCopy(locale).ai.chooseAction
     : picker === "language"
-      ? (english ? "Choose target language" : "选择目标语言")
-      : (english ? "Choose tone" : "选择语气");
+      ? getMobileEditorCopy(locale).ai.chooseTargetLanguage
+      : getMobileEditorCopy(locale).ai.chooseTone;
 
   const choosePickerOption = (value: string) => {
     if (picker === "action") selectPromptOrAction(value);
     if (picker === "language") {
       const targetLanguage = value as AiTargetLanguage;
       persistLastAction(panel.action, panel.promptId, targetLanguage);
-      update({ targetLanguage, output: "", error: null });
+      update({ targetLanguage, output: "", error: null, incomplete: null });
     }
     if (picker === "tone") {
       const tone = value as AiTone;
       persistLastAction(panel.action, panel.promptId, panel.targetLanguage, tone);
-      update({ tone, output: "", error: null });
+      update({ tone, output: "", error: null, incomplete: null });
     }
     setPicker(null);
   };
@@ -1976,8 +1982,8 @@ const MobileSelectionAiPanel = ({
   return (
     <section
       aria-label={panel.selection.wholeNote
-        ? (english ? "AI whole-note assistant" : "AI 全文助手")
-        : (english ? "AI selection assistant" : "AI 选区助手")}
+        ? getMobileEditorCopy(locale).ai.noteTitle
+        : getMobileEditorCopy(locale).ai.selectionTitle}
       aria-modal="true"
       className="edgeever-ai-panel"
       role="dialog"
@@ -1985,19 +1991,19 @@ const MobileSelectionAiPanel = ({
       <header className="edgeever-ai-panel-header">
         <div>
           <strong>{panel.selection.wholeNote
-            ? (english ? "AI whole-note assistant" : "AI 全文助手")
-            : (english ? "AI selection assistant" : "AI 选区助手")}</strong>
+            ? getMobileEditorCopy(locale).ai.noteTitle
+            : getMobileEditorCopy(locale).ai.selectionTitle}</strong>
           <small>{panel.selection.wholeNote
-            ? (english ? "No text selected; the whole note will be processed." : "未选择文字，将处理整篇正文。")
-            : (english ? "Only the selected text will be processed." : "只处理当前选中的正文。")}</small>
+            ? getMobileEditorCopy(locale).ai.noteScopeHint
+            : getMobileEditorCopy(locale).ai.selectionScopeHint}</small>
         </div>
-        <button aria-label={english ? "Close" : "关闭"} onClick={onClose} type="button">×</button>
+        <button aria-label={getMobileEditorCopy(locale).close} onClick={onClose} type="button">×</button>
       </header>
       <div className="edgeever-ai-panel-body">
         <MobileAiPickerField
           disabled={panel.generating}
           expanded={picker === "action"}
-          label={english ? "Action" : "处理方式"}
+          label={getMobileEditorCopy(locale).ai.action}
           onOpen={() => setPicker("action")}
           value={selectedPrompt?.name ?? actionLabels[panel.action]}
         />
@@ -2005,7 +2011,7 @@ const MobileSelectionAiPanel = ({
           <MobileAiPickerField
             disabled={panel.generating}
             expanded={picker === "language"}
-            label={english ? "Target language" : "目标语言"}
+            label={getMobileEditorCopy(locale).ai.targetLanguage}
             onOpen={() => setPicker("language")}
             value={languageLabels[panel.targetLanguage]}
           />
@@ -2014,34 +2020,34 @@ const MobileSelectionAiPanel = ({
           <MobileAiPickerField
             disabled={panel.generating}
             expanded={picker === "tone"}
-            label={english ? "Tone" : "语气"}
+            label={getMobileEditorCopy(locale).ai.tone}
             onOpen={() => setPicker("tone")}
             value={toneLabels[panel.tone]}
           />
         ) : null}
         {!panel.promptId && panel.action === "custom" ? (
           <label>
-            <span>{english ? "Tell AI what to do" : "告诉 AI 你想怎么处理"}</span>
+            <span>{getMobileEditorCopy(locale).ai.instruction}</span>
             <textarea
               disabled={panel.generating}
               maxLength={2000}
               onChange={(event) => update({ customInstruction: event.target.value })}
-              placeholder={english ? "For example: Rewrite this as a concise email." : "例如：改写成一封简洁的邮件。"}
+              placeholder={getMobileEditorCopy(locale).ai.instructionPlaceholder}
               rows={3}
               value={panel.customInstruction}
             />
           </label>
         ) : null}
         <div className="edgeever-ai-result-heading">
-          <span>{english ? "AI draft" : "AI 草稿"}</span>
-          {panel.generating ? <small>{english ? "Generating…" : "生成中…"}</small> : null}
+          <span>{getMobileEditorCopy(locale).ai.draft}</span>
+          {panel.generating ? <small>{getMobileEditorCopy(locale).ai.generating}</small> : null}
         </div>
         <div aria-live="polite" className="edgeever-ai-result">
-          {panel.output || <span>{english ? "The generated draft will appear here." : "生成的草稿会显示在这里。"}</span>}
+          {panel.output || <span>{getMobileEditorCopy(locale).ai.draftPlaceholder}</span>}
         </div>
         {panel.output && !panel.generating ? (
           <label>
-            <span>{english ? "Refine result" : "继续调整"}</span>
+            <span>{getMobileEditorCopy(locale).ai.refineResult}</span>
             <div className="edgeever-ai-refine-row">
               <input
                 maxLength={2000}
@@ -2052,31 +2058,49 @@ const MobileSelectionAiPanel = ({
                     onRefine(panel.refineInstruction);
                   }
                 }}
-                placeholder={english ? "Make it more concise" : "例如：再简洁一点"}
+                placeholder={getMobileEditorCopy(locale).ai.refinePlaceholder}
                 value={panel.refineInstruction}
               />
               <button disabled={!panel.refineInstruction.trim()} onClick={() => onRefine(panel.refineInstruction)} type="button">
-                {english ? "Refine" : "调整"}
+                {getMobileEditorCopy(locale).ai.refine}
               </button>
             </div>
           </label>
+        ) : null}
+        {panel.generating && panel.progress ? (
+          <p aria-live="polite" className="edgeever-ai-progress">
+            {getMobileEditorCopy(locale).ai.progressPart
+              .replace("{{part}}", String(panel.progress.part))
+              .replace("{{parts}}", String(panel.progress.parts))}
+          </p>
+        ) : null}
+        {panel.incomplete && panel.output && !panel.generating ? (
+          <p className="edgeever-ai-error" role="alert">
+            {panel.incomplete === "truncated" && panel.incompleteParts?.length
+              ? getMobileEditorCopy(locale).ai.incompleteParts.replace("{{parts}}", formatAiPartList(panel.incompleteParts, locale))
+              : panel.incomplete === "truncated"
+              ? getMobileEditorCopy(locale).ai.incompleteTruncated
+              : panel.incomplete === "stopped"
+                ? getMobileEditorCopy(locale).ai.incompleteStopped
+                : getMobileEditorCopy(locale).ai.incompleteInterrupted}
+          </p>
         ) : null}
         {panel.error ? <p className="edgeever-ai-error" role="alert">{panel.error}</p> : null}
       </div>
       <footer className="edgeever-ai-panel-footer">
         <div>
           <button disabled={appendDisabled} onClick={() => onApply("append")} type="button">
-            {english ? "Insert after" : "插入到选区后"}
+            {getMobileEditorCopy(locale).ai.insertAfter}
           </button>
           <button disabled={replaceDisabled} onClick={() => onApply("replace")} type="button">
-            {english ? "Replace selection" : "替换选中内容"}
+            {getMobileEditorCopy(locale).ai.replaceSelection}
           </button>
         </div>
         {panel.generating ? (
-          <button className="is-primary" onClick={onStop} type="button">{english ? "Stop" : "停止"}</button>
+          <button className="is-primary" onClick={onStop} type="button">{getMobileEditorCopy(locale).ai.stop}</button>
         ) : (
           <button className="is-primary" disabled={generateDisabled} onClick={onGenerate} type="button">
-            {panel.output ? (english ? "Regenerate" : "重新生成") : (english ? "Generate" : "生成")}
+            {panel.output ? getMobileEditorCopy(locale).ai.regenerate : getMobileEditorCopy(locale).ai.generate}
           </button>
         )}
       </footer>
@@ -2092,7 +2116,7 @@ const MobileSelectionAiPanel = ({
             <div aria-hidden="true" className="edgeever-ai-picker-handle" />
             <header className="edgeever-ai-picker-header">
               <strong>{pickerTitle}</strong>
-              <button aria-label={english ? "Close" : "关闭"} onClick={() => setPicker(null)} type="button">×</button>
+              <button aria-label={getMobileEditorCopy(locale).close} onClick={() => setPicker(null)} type="button">×</button>
             </header>
             <div aria-label={pickerTitle} className="edgeever-ai-picker-options" role="radiogroup">
               {pickerOptions.map((option) => (
@@ -2288,6 +2312,7 @@ const applyImageWidth = (
   const width = parseImageWidth(attributes.width) ?? NEW_IMAGE_WIDTH_PERCENT;
   element.style.width = `${width}%`;
   element.dataset.width = String(width);
+  applyImageAlignment(element, attributes.alignment);
   return width;
 };
 
@@ -2327,8 +2352,29 @@ const loadMermaid = () => {
   return mermaidRuntime;
 };
 
+let mermaidRenderQueue: Promise<unknown> = Promise.resolve();
+
+const renderMobileMermaid = (source: string, theme: "light" | "dark", htmlLabels = true) => {
+  // Mermaid shares its configuration across renders, including different themes.
+  const result = mermaidRenderQueue.then(async () => {
+    const mermaid = await loadMermaid();
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: "strict",
+      suppressErrorRendering: true,
+      theme: "base",
+      themeVariables: getMobileMermaidThemeVariables(theme),
+      htmlLabels,
+      flowchart: { nodeSpacing: 25, rankSpacing: 30, subGraphTitleMargin: { bottom: 12 } },
+    });
+    return mermaid.render(`edgeever-mobile-mermaid-${++mermaidRenderSequence}`, source);
+  });
+  mermaidRenderQueue = result.catch(() => undefined);
+  return result;
+};
+
 const createMobileCodeBlockExtension = (
-  locale: "zh-CN" | "en-US" | "ja" | "pl",
+  locale: MobileEditorLocale,
   theme: "light" | "dark",
   hideCopyForVisualDiagram = false,
 ) => CodeBlock.extend({
@@ -2356,12 +2402,12 @@ const createMobileCodeBlockExtension = (
       message.className = "edgeever-mermaid-message";
       svgContainer.className = "edgeever-mermaid-svg";
       svgContainer.setAttribute("role", "img");
-      svgContainer.setAttribute("aria-label", locale !== "zh-CN" ? "Mermaid diagram preview" : "Mermaid 图表预览");
+      svgContainer.setAttribute("aria-label", getMobileEditorCopy(locale).codeBlock.mermaidPreview);
       copyButton.type = "button";
       copyButton.className = "edgeever-code-copy-button";
       copyButton.contentEditable = "false";
-      copyButton.setAttribute("aria-label", locale !== "zh-CN" ? "Copy code" : "复制代码");
-      copyButton.textContent = locale !== "zh-CN" ? "Copy code" : "复制代码";
+      copyButton.setAttribute("aria-label", getMobileEditorCopy(locale).codeBlock.copy);
+      copyButton.textContent = getMobileEditorCopy(locale).codeBlock.copy;
       copyButton.addEventListener("pointerdown", (event) => {
         event.preventDefault();
         event.stopPropagation();
@@ -2370,21 +2416,21 @@ const createMobileCodeBlockExtension = (
         event.preventDefault();
         event.stopPropagation();
         void Clipboard.setStringAsync(currentNode.textContent).then(() => {
-          copyButton.textContent = locale !== "zh-CN" ? "Copied" : "已复制";
-          copyButton.setAttribute("aria-label", locale !== "zh-CN" ? "Copied" : "已复制");
+          copyButton.textContent = getMobileEditorCopy(locale).codeBlock.copied;
+          copyButton.setAttribute("aria-label", getMobileEditorCopy(locale).codeBlock.copied);
           if (copyResetTimer !== null) window.clearTimeout(copyResetTimer);
           copyResetTimer = window.setTimeout(() => {
-            copyButton.textContent = locale !== "zh-CN" ? "Copy code" : "复制代码";
-            copyButton.setAttribute("aria-label", locale !== "zh-CN" ? "Copy code" : "复制代码");
+            copyButton.textContent = getMobileEditorCopy(locale).codeBlock.copy;
+            copyButton.setAttribute("aria-label", getMobileEditorCopy(locale).codeBlock.copy);
             copyResetTimer = null;
           }, 1800);
         }).catch(() => {
-          copyButton.textContent = locale !== "zh-CN" ? "Copy failed" : "复制失败";
-          copyButton.setAttribute("aria-label", locale !== "zh-CN" ? "Copy failed" : "复制失败");
+          copyButton.textContent = getMobileEditorCopy(locale).codeBlock.copyFailed;
+          copyButton.setAttribute("aria-label", getMobileEditorCopy(locale).codeBlock.copyFailed);
           if (copyResetTimer !== null) window.clearTimeout(copyResetTimer);
           copyResetTimer = window.setTimeout(() => {
-            copyButton.textContent = locale !== "zh-CN" ? "Copy code" : "复制代码";
-            copyButton.setAttribute("aria-label", locale !== "zh-CN" ? "Copy code" : "复制代码");
+            copyButton.textContent = getMobileEditorCopy(locale).codeBlock.copy;
+            copyButton.setAttribute("aria-label", getMobileEditorCopy(locale).codeBlock.copy);
             copyResetTimer = null;
           }, 1800);
         });
@@ -2414,8 +2460,8 @@ const createMobileCodeBlockExtension = (
         wrapper.dataset.language = language;
         preview.hidden = !isMermaid;
         code.setAttribute("aria-label", isMermaid
-          ? (locale !== "zh-CN" ? "Mermaid source" : "Mermaid 源码")
-          : (locale !== "zh-CN" ? "Code source" : "代码源码"));
+          ? getMobileEditorCopy(locale).codeBlock.mermaidSource
+          : getMobileEditorCopy(locale).codeBlock.codeSource);
         if (!isMermaid) {
           preview.replaceChildren();
           return;
@@ -2424,7 +2470,7 @@ const createMobileCodeBlockExtension = (
         const source = currentNode.textContent.trim();
         if (!source) {
           message.className = "edgeever-mermaid-message";
-          message.textContent = locale !== "zh-CN" ? "Enter Mermaid source below." : "请在下方输入 Mermaid 源码。";
+          message.textContent = getMobileEditorCopy(locale).codeBlock.mermaidEmpty;
           preview.replaceChildren(message);
           return;
         }
@@ -2432,29 +2478,9 @@ const createMobileCodeBlockExtension = (
         const activeRequest = renderRequest;
         renderTimer = window.setTimeout(() => {
           message.className = "edgeever-mermaid-message";
-          message.textContent = locale !== "zh-CN" ? "Rendering diagram…" : "正在渲染图表…";
+          message.textContent = getMobileEditorCopy(locale).codeBlock.rendering;
           preview.replaceChildren(message);
-          void loadMermaid()
-            .then(async (mermaid) => {
-              const beautifulSvg = await renderWithBeautifulMermaid(source, theme);
-              if (beautifulSvg) {
-                return { svg: beautifulSvg };
-              }
-              mermaid.initialize({
-                startOnLoad: false,
-                securityLevel: "strict",
-                suppressErrorRendering: true,
-                theme: "base",
-                themeVariables: getMobileMermaidThemeVariables(theme),
-                flowchart: { nodeSpacing: 25, rankSpacing: 30 },
-              });
-              const valid = await mermaid.parse(source, { suppressErrors: true });
-              if (!valid) {
-                throw new Error("Invalid Mermaid diagram");
-              }
-              mermaidRenderSequence += 1;
-              return mermaid.render(`edgeever-mobile-editor-mermaid-${mermaidRenderSequence}`, source);
-            })
+          void renderMobileMermaid(source, theme)
             .then(({ svg }) => {
               if (activeRequest !== renderRequest) {
                 return;
@@ -2474,9 +2500,7 @@ const createMobileCodeBlockExtension = (
                 return;
               }
               message.className = "edgeever-mermaid-error";
-              message.textContent = locale !== "zh-CN"
-                ? "Unable to render this diagram. Check its syntax."
-                : "无法渲染此图表，请检查语法。";
+              message.textContent = getMobileEditorCopy(locale).codeBlock.renderFailed;
               preview.replaceChildren(message);
             });
         }, 300);
@@ -2504,7 +2528,7 @@ const createMobileCodeBlockExtension = (
 });
 
 const createMobileImageSizeControls = (
-  locale: "zh-CN" | "en-US" | "ja" | "pl",
+  locale: MobileEditorLocale,
   updateWidth: (width: number) => void
 ) => {
   const controls = document.createElement("div");
@@ -2556,7 +2580,7 @@ const createMobileImageSizeControls = (
 
 const createProtectedImageExtension = (
   baseUrl: string,
-  locale: "zh-CN" | "en-US" | "ja" | "pl",
+  locale: MobileEditorLocale,
   loadResource: (source: string) => Promise<string | null>,
   options?: {
     readOnly?: boolean | (() => boolean);
@@ -2617,10 +2641,7 @@ const createProtectedImageExtension = (
         if (!options?.onImagePreview) return false;
         const source = figure.dataset.resourceHref ?? "";
         if (!source) return false;
-        void options.onImagePreview(JSON.stringify({
-          alt: figure.dataset.resourceFilename || "",
-          source,
-        }));
+        void options.onImagePreview(buildMobileImagePreviewPayload(figure));
         return true;
       };
 
@@ -2661,7 +2682,7 @@ const createProtectedImageExtension = (
         const spinner = document.createElement("span");
         spinner.className = "edgeever-image-upload-spinner";
         spinner.setAttribute("aria-hidden", "true");
-        overlay.append(spinner, locale !== "zh-CN" ? "Uploading image…" : "图片上传中…");
+        overlay.append(spinner, getMobileEditorCopy(locale).image.uploading);
         if (previewSource) {
           placeholder.append(preview);
         }
@@ -2716,7 +2737,7 @@ const createProtectedImageExtension = (
             if (activeRequestId !== requestId) {
               return;
             }
-            overlay.textContent = locale !== "zh-CN" ? "Image failed to load" : "图片加载失败";
+            overlay.textContent = getMobileEditorCopy(locale).image.loadFailed;
           };
           preload.src = displaySource;
         };
@@ -2741,11 +2762,11 @@ const createProtectedImageExtension = (
                 revealLoadedImage(dataUrl, attributes, activeRequestId);
                 return;
               }
-              overlay.textContent = locale !== "zh-CN" ? "Image failed to load" : "图片加载失败";
+              overlay.textContent = getMobileEditorCopy(locale).image.loadFailed;
             })
             .catch(() => {
               if (activeRequestId === requestId) {
-                overlay.textContent = locale !== "zh-CN" ? "Image failed to load" : "图片加载失败";
+                overlay.textContent = getMobileEditorCopy(locale).image.loadFailed;
               }
             });
         };
@@ -2809,7 +2830,7 @@ const createProtectedImageExtension = (
       actionButton.className = "edgeever-image-actions";
       actionButton.contentEditable = "false";
       actionButton.hidden = true;
-      actionButton.setAttribute("aria-label", locale !== "zh-CN" ? "Image actions" : "图片操作");
+      actionButton.setAttribute("aria-label", getMobileEditorCopy(locale).image.actions);
       actionButton.textContent = "⋯";
       bindImageActionButton(wrapper, actionButton);
       image.addEventListener("click", (event) => {
@@ -2845,7 +2866,7 @@ const createProtectedImageExtension = (
           loading.replaceChildren();
           const label = document.createElement("span");
           label.className = "edgeever-image-loading-label";
-          label.textContent = locale !== "zh-CN" ? "Image failed to load" : "图片加载失败";
+          label.textContent = getMobileEditorCopy(locale).image.loadFailed;
           loading.append(label);
           loading.hidden = false;
         } else if (phase === "loading") {
@@ -3183,6 +3204,7 @@ const getEditorStyles = (theme: "light" | "dark", options?: { viewer?: boolean }
   .edgeever-ai-refine-row input { min-width: 0; flex: 1; }
   .edgeever-ai-refine-row button, .edgeever-ai-panel-footer button { min-height: 40px; padding: 0 12px; border: 1px solid ${theme === "dark" ? "#475569" : "#cbd5e1"}; border-radius: 9px; background: ${theme === "dark" ? "#111c18" : "#fff"}; color: ${theme === "dark" ? "#f8fafc" : "#0f172a"}; font-weight: 700; }
   .edgeever-ai-panel button:disabled { opacity: 0.42; }
+  .edgeever-ai-progress { margin: 0; color: ${theme === "dark" ? "#a1a1aa" : "#52525b"}; font-size: 13px; line-height: 1.45; }
   .edgeever-ai-error { margin: 0; color: ${theme === "dark" ? "#fda4af" : "#be123c"}; font-size: 13px; line-height: 1.45; }
   .edgeever-ai-panel-footer { display: grid; flex: 0 0 auto; gap: 9px; padding: 10px 12px max(10px, env(safe-area-inset-bottom)); border-top: 1px solid ${theme === "dark" ? "#334155" : "#e2e8f0"}; background: ${theme === "dark" ? "#111c18" : "#fff"}; }
   .edgeever-ai-panel-footer > div { display: flex; gap: 8px; }
@@ -3247,7 +3269,7 @@ const getEditorStyles = (theme: "light" | "dark", options?: { viewer?: boolean }
   .edgeever-editor-content ul[data-type="taskList"] ul[data-type="taskList"] { margin: 4px 0 0; padding-left: 24px; }
   .edgeever-editor-content blockquote { margin-left: 0; margin-right: 0; max-width: 100%; padding: 6px 12px; border-left: 3px solid ${theme === "dark" ? "#475569" : "#cbd5e1"}; border-radius: 1px 4px 4px 1px; background: ${theme === "dark" ? "rgba(255, 255, 255, 0.05)" : "#f3f5f7"}; color: ${theme === "dark" ? "#f8fafc" : "#3d4450"}; }
   .edgeever-editor-content pre { max-width: 100%; overflow-x: auto; border-radius: 8px; border: 1px solid ${theme === "dark" ? "#334155" : "#e2e8f0"}; padding: 12px 90px 12px 14px; background: ${theme === "dark" ? "#1e293b" : "#f8fafc"}; color: ${theme === "dark" ? "#e2e8f0" : "#0f172a"}; font-size: 0.88rem; box-shadow: 0 1px 2px ${theme === "dark" ? "rgba(0, 0, 0, 0.2)" : "rgba(15, 23, 42, 0.03)"}; }
-  .edgeever-editor-content code { border-radius: 4px; padding: 2px 5px; border: 1px solid ${theme === "dark" ? "rgba(255, 255, 255, 0.12)" : "#e1e5ea"}; background: ${theme === "dark" ? "rgba(255, 255, 255, 0.06)" : "#f3f5f7"}; color: ${theme === "dark" ? "#f8fafc" : "#3d4450"}; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.88em; font-weight: 550; }
+  .edgeever-editor-content code { border-radius: 4px; padding: 2px 5px; border: 1px solid ${theme === "dark" ? "rgba(255, 255, 255, 0.12)" : "#e1e5ea"}; background: ${theme === "dark" ? "rgba(255, 255, 255, 0.06)" : "#f3f5f7"}; color: ${theme === "dark" ? "#f8fafc" : "#3d4450"}; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.88em; font-weight: 400; }
   .edgeever-editor-content pre code { padding: 0; border: 0; background: transparent; font-size: inherit; font-weight: normal; color: inherit; }
   .edgeever-editor-content .tiptap-mathematics-render[data-type="block-math"] { max-width: 100%; margin: 16px 0; overflow-x: auto; overflow-y: hidden; padding: 4px 0; text-align: center; -webkit-overflow-scrolling: touch; }
   .edgeever-editor-content .inline-math-error, .edgeever-editor-content .block-math-error { color: ${theme === "dark" ? "#fda4af" : "#be123c"}; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }

@@ -14,6 +14,7 @@ import {
   classifyAcpFailure,
   createAcpHostRuntime,
   createAcpSpawnPlan,
+  desktopToolPath,
   detectInstalledAgentApps,
   eventsFromSessionUpdate,
   isAuthRequiredError,
@@ -23,6 +24,7 @@ import {
   sanitizeFailureDetail,
   spawnAcpChild,
 } from "./acp-host.mjs";
+import { prepareWorkBuddyAuth } from "./workbuddy-auth.mjs";
 
 const require = createRequire(import.meta.url);
 const sdkHref = pathToFileURL(require.resolve("@agentclientprotocol/sdk")).href;
@@ -84,15 +86,16 @@ const collector = () => {
   };
 };
 
-const fakeAgentSource = ({ reportPath, secretPath, allowImage, allowEmbedded, hold, requireAuth, advertiseAuth, promptRefusal, hangAuth, hangSession, failSessionBeforeLogin, workBuddyAccountApi, workBuddyLoginFailure, workBuddyUnreadable, workBuddyUnreadableAfterLogin, authMethodId = "browser", authStatusKind, advertiseAuthStatus = false, authStatusDelay = 20, stderrText, promptAuthStatusKind }) => `#!/usr/bin/env bun
+const fakeAgentSource = ({ reportPath, secretPath, allowImage, allowEmbedded, hold, requireAuth, advertiseAuth, promptRefusal, hangAuth, hangSession, failSessionBeforeLogin, workBuddyAccountApi, workBuddyLoginFailure, workBuddyUnreadable, workBuddyUnreadableAfterLogin, authMethodId = "browser", authStatusKind, advertiseAuthStatus = false, authStatusDelay = 20, stderrText, promptAuthStatusKind, codeBuddy }) => `#!/usr/bin/env bun
 import * as acp from ${JSON.stringify(sdkHref)};
-import { writeFileSync, readFileSync } from "node:fs";
+import { writeFileSync, readFileSync, appendFileSync, existsSync } from "node:fs";
 
 const reportPath = ${JSON.stringify(reportPath)};
 const secretPath = ${JSON.stringify(secretPath)};
 const allowImage = ${allowImage ? "true" : "false"};
 const allowEmbedded = ${allowEmbedded ? "true" : "false"};
 const hold = ${hold ? "true" : "false"};
+let held = false;
 const requireAuth = ${requireAuth ? "true" : "false"};
 const advertiseAuth = ${advertiseAuth ? "true" : "false"};
 const promptRefusal = ${promptRefusal ? JSON.stringify(promptRefusal) : "null"};
@@ -102,9 +105,16 @@ if (${workBuddyAccountApi ? "true" : "false"}) {
   try { Object.assign(report, JSON.parse(readFileSync(reportPath, "utf8"))); authenticated = report.accountLogin === true && ${workBuddyLoginFailure ? "false" : "true"}; } catch {}
 }
 if (${workBuddyUnreadable ? "true" : "false"}) authenticated = true;
+// CodeBuddy keeps its login in its own config directory; a file stands in for it.
+const codeBuddy = ${JSON.stringify(codeBuddy ?? null)};
+if (codeBuddy?.persist && existsSync(reportPath + ".login")) authenticated = true;
+const codeBuddyRestored = authenticated;
 const restoredAccount = authenticated;
 const save = () => writeFileSync(reportPath, JSON.stringify(report));
-if (${workBuddyAccountApi ? "true" : "false"}) {
+// Like WorkBuddy, serve the account API only when started with --serve, which
+// sets SERVER__PORT. Probes and chats start without it, and listening on port
+// NaN is an error in Node and newer Bun versions.
+if (${workBuddyAccountApi ? "true" : "false"} && process.env.SERVER__PORT) {
   const { createServer } = await import("node:http");
   const server = createServer(async (req, res) => {
     if (req.headers.authorization !== "Bearer " + process.env.CODEBUDDY_GATEWAY_PASSWORD) {
@@ -177,14 +187,19 @@ acp.agent({ name: "edgeever-fake-agent" })
       authMethods: requireAuth || advertiseAuth ? [{ id: ${JSON.stringify(authMethodId)}, name: "Browser" }] : [],
     };
   })
-  .onRequest("_codebuddy.ai/getUserInfo", (params) => params, () => ({ userInfo: authenticated ? { ${workBuddyUnreadable ? 'userId: "saved-user"' : 'accessToken: "new-token"'} , ...(${workBuddyUnreadableAfterLogin ? "true" : "false"} && restoredAccount ? { accessToken: undefined, userId: "saved-user" } : {}) } : undefined }))
-  .onRequest("authenticate", (ctx) => {
+  .onRequest("_codebuddy.ai/getUserInfo", (params) => params, async () => {
+    if (codeBuddy?.slowRestore && codeBuddyRestored) await new Promise((resolve) => setTimeout(resolve, 3000));
+    return { userInfo: authenticated ? { ${workBuddyUnreadable || codeBuddy?.tokenless ? 'userId: "saved-user"' : 'accessToken: "new-token"'} , ...(${workBuddyUnreadableAfterLogin ? "true" : "false"} && restoredAccount ? { accessToken: undefined, userId: "saved-user" } : {}) } : undefined };
+  })
+  .onRequest("authenticate", async (ctx) => {
     report.authMethod = ctx.params.methodId;
+    for (const authUrl of codeBuddy?.authUrls ?? []) await ctx.client.notify("_codebuddy.ai/authUrl", { authUrl, provider: "fixture" });
     if (${hangAuth ? "true" : "false"}) {
       save();
       return new Promise(() => {});
     }
     authenticated = true;
+    if (codeBuddy?.persist && !codeBuddy?.forgetAfterLogin) writeFileSync(reportPath + ".login", "1");
     if (${advertiseAuthStatus ? "true" : "false"}) void ctx.client.notify("_auth/status_update", { authStatus: { kind: "api_key", label: "Fixture" } });
     save();
     return {};
@@ -192,6 +207,8 @@ acp.agent({ name: "edgeever-fake-agent" })
   .onRequest("session/new", (ctx) => {
     if (${failSessionBeforeLogin ? "true" : "false"} && !authenticated) throw new acp.RequestError(-32603, "connection_failed");
     if (requireAuth && !authenticated) throw new acp.RequestError(-32000, "auth_required");
+    report.sessionCount = (report.sessionCount ?? 0) + 1;
+    appendFileSync(reportPath + ".sessions", String(process.pid) + "\\n");
     report.newSession = { cwd: ctx.params.cwd, mcpServers: ctx.params.mcpServers };
     save();
     if (${hangSession ? "true" : "false"}) return new Promise(() => {});
@@ -201,6 +218,7 @@ acp.agent({ name: "edgeever-fake-agent" })
     if (${promptAuthStatusKind ? "true" : "false"}) {
       await ctx.client.notify("_auth/status_update", { authStatus: { kind: ${JSON.stringify(promptAuthStatusKind ?? "none")}, label: "Fixture" } });
     }
+    report.prompts = [...(report.prompts ?? []), ctx.params.prompt];
     report.prompt = ctx.params.prompt;
     save();
     if (promptRefusal) return promptRefusal;
@@ -216,7 +234,7 @@ acp.agent({ name: "edgeever-fake-agent" })
       sessionId: ctx.params.sessionId,
       update: { sessionUpdate: "tool_call", toolCallId: "call_1", name: "search", title: "Search notes", status: "pending" },
     });
-    if (!hold) {
+    if (!(hold && !held)) {
       try {
         const result = await ctx.client.request("fs/read_text_file", { sessionId: ctx.params.sessionId, path: secretPath });
         report.readResult = result?.content ?? result ?? null;
@@ -232,6 +250,7 @@ acp.agent({ name: "edgeever-fake-agent" })
       save();
       return { stopReason: "end_turn" };
     }
+    held = true;
     await released;
     return { stopReason: "cancelled" };
   })
@@ -246,6 +265,16 @@ const writeFakeAgent = async (directory, options) => {
   await writeFile(scriptPath, fakeAgentSource(options), "utf8");
   await chmod(scriptPath, 0o755);
   return scriptPath;
+};
+
+const processAlive = (pid) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    if (error?.code === "ESRCH") return false;
+    throw error;
+  }
 };
 
 const waitUntilExited = async (pid) => {
@@ -348,7 +377,13 @@ describe("ACP command allow-list", () => {
       for (const name of ["claude-agent-acp", "openclaw", "hermes"]) {
         await writeFile(path.join(directory, name), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
       }
-      const deps = { platform: "darwin", pathEnv: directory, home: directory };
+      // Only the temporary directory exists, so commands installed on the
+      // machine running the tests (for example in /opt/homebrew/bin) are ignored.
+      const onlyTemporaryDirectory = (candidate) => {
+        if (!candidate.startsWith(directory)) throw Object.assign(new Error(`ENOENT: ${candidate}`), { code: "ENOENT" });
+        return realpathSync(candidate);
+      };
+      const deps = { platform: "darwin", pathEnv: directory, home: directory, realpathSync: onlyTemporaryDirectory };
       expect(resolveAcpCommand({ id: "claudeCode" }, deps).command).toMatchObject({ command: realpathSync(path.join(directory, "claude-agent-acp")), args: [] });
       expect(resolveAcpCommand({ id: "openClaw" }, deps).command).toMatchObject({ command: realpathSync(path.join(directory, "openclaw")), args: ["acp"] });
       expect(resolveAcpCommand({ id: "hermesAgent" }, deps).command).toMatchObject({ command: realpathSync(path.join(directory, "hermes")), args: ["acp"] });
@@ -357,6 +392,30 @@ describe("ACP command allow-list", () => {
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
+  });
+
+  test("records sanitized update failures and clears them after a manual retry including no-op success", async () => {
+    let fail = true;
+    const diagnostics = [];
+    const runtime = createAcpHostRuntime({
+      onUpdateDiagnostic: (event) => diagnostics.push(event),
+      adapterManager: {
+        get: (id) => id === "antigravity" ? { version: "1.3.0", command: { command: "/tmp/agy", args: [] } } : null,
+        installedIds: () => ["antigravity"],
+        install: async () => {
+          if (fail) throw Object.assign(new Error("fetch failed https://example.com/?token=private"), { updateStage: "download", cause: { code: "ETIMEDOUT" } });
+          return { updated: false, version: "1.3.0" };
+        },
+      },
+    });
+    const [result] = await runtime.updateInstalled();
+    expect(result.reason).toBe("download: fetch failed [url] (ETIMEDOUT)");
+    expect(runtime.listAdapters().find((item) => item.id === "antigravity").updateError).toBe(result.reason);
+    expect(diagnostics).toEqual([{ id: "antigravity", reason: result.reason }]);
+    await expect(runtime.installAdapter("antigravity")).rejects.toThrow(result.reason);
+    fail = false;
+    expect(await runtime.installAdapter("antigravity")).toEqual({ updated: false, version: "1.3.0" });
+    expect(runtime.listAdapters().find((item) => item.id === "antigravity").updateError).toBeUndefined();
   });
 
   test("automatically installs only a detected agent missing its ACP connector", async () => {
@@ -445,6 +504,21 @@ describe("ACP command allow-list", () => {
       expect(nativeInternational.command.args.slice(1)).toEqual([realpathSync(bundled), "--acp"]);
       expect(nativeInternational.command.env).toEqual({ ELECTRON_RUN_AS_NODE: "1" });
       expect(nativeInternational.command.unsetEnv).toEqual(["CODEBUDDY_INTERNET_ENVIRONMENT"]);
+      // WorkBuddy 5.8+ ships only the lite-wb bundle, whose stdio ACP needs --serve.
+      const dist = path.resolve(path.dirname(bundled), "../dist");
+      await mkdir(dist, { recursive: true });
+      await writeFile(path.join(dist, "codebuddy-lite-wb.mjs"), "// fake lite-wb bundle");
+      const liteDomestic = resolveAcpCommand({ id: "workbuddyCn" }, deps);
+      expect(liteDomestic.command.args.slice(1)).toEqual([realpathSync(bundled), "--acp", "--serve", "--acp-transport", "stdio", "--host", "127.0.0.1"]);
+      expect(liteDomestic.command.env).toEqual({ CODEBUDDY_INTERNET_ENVIRONMENT: "internal", CODEBUDDY_FORCE_LITE_WB_BUNDLE: "1", SERVER__HOST: "127.0.0.1", ELECTRON_RUN_AS_NODE: "1" });
+      const liteAuth = await prepareWorkBuddyAuth(liteDomestic.command);
+      for (const flag of ["--serve", "--acp-transport", "--host", "--port"]) {
+        expect(liteAuth.command.args.filter((arg) => arg === flag)).toHaveLength(1);
+      }
+      expect(liteAuth.command.args).toEqual([...liteDomestic.command.args, "--port", new URL(liteAuth.endpoint).port]);
+      // A full bundle beside lite-wb keeps the legacy launch.
+      await writeFile(path.join(dist, "codebuddy.js"), "// fake full bundle");
+      expect(resolveAcpCommand({ id: "workbuddyCn" }, deps).command.args.slice(1)).toEqual([realpathSync(bundled), "--acp"]);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
@@ -491,10 +565,11 @@ describe("ACP prompt blocks", () => {
   });
 
   test("puts a Codex user's request before context for a useful thread title", () => {
-    const content = buildPromptContent({ prompt: "分析资金往来", contextText: "Current note and earlier turns", promptFirst: true });
+    const content = buildPromptContent({ prompt: "分析资金往来", contextText: "Current note and earlier turns", historyText: "Earlier turns", promptFirst: true });
     expect(content.blocks).toEqual([
       { type: "text", text: "分析资金往来" },
       { type: "text", text: "Current note and earlier turns" },
+      { type: "text", text: "Earlier turns" },
     ]);
   });
 
@@ -541,6 +616,68 @@ describe("ACP spawn and failure mapping", () => {
     expect(captured.options.shell).toBe(false);
     expect(captured.options.stdio).toEqual(["pipe", "pipe", "pipe"]);
     await rm(workspace, { recursive: true, force: true });
+  });
+
+  test("adds node tool directories so a Dock-launched agent can exec npx", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "edgeever-acp-path-"));
+    const homeDir = "/Users/example";
+    const nvmBin = path.join(homeDir, ".nvm", "versions", "node", "v22.14.0", "bin");
+    const present = new Set(["/opt/homebrew/bin", path.join(homeDir, ".volta", "bin"), nvmBin]);
+    const deps = {
+      platform: "darwin",
+      home: homeDir,
+      env: { PATH: "/usr/bin:/bin", HOME: homeDir },
+      exists: (dir) => present.has(dir),
+      readFile: (file) => {
+        if (file === path.join(homeDir, ".nvm", "alias", "default")) return "v22.14.0\n";
+        throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+      },
+    };
+    try {
+      const plan = createAcpSpawnPlan("/Applications/Antigravity.app/Contents/MacOS/Antigravity", workspace, deps);
+      expect(plan.options.shell).toBe(false);
+      expect(plan.options.env.PATH).toBe(`/opt/homebrew/bin:${path.join(homeDir, ".volta", "bin")}:${nvmBin}:/usr/bin:/bin`);
+      const narrowed = createAcpSpawnPlan({
+        command: "/bin/openclaw",
+        args: ["acp"],
+        env: { PATH: "/custom/bin:/opt/homebrew/bin" },
+      }, workspace, deps);
+      expect(narrowed.options.env.PATH).toBe(`${path.join(homeDir, ".volta", "bin")}:${nvmBin}:/custom/bin:/opt/homebrew/bin`);
+      expect(desktopToolPath({
+        platform: "darwin",
+        home: homeDir,
+        pathEnv: "/usr/bin",
+        exists: () => true,
+        readFile: () => "lts/*",
+      })).toBe([
+        path.join(homeDir, ".local", "bin"),
+        "/opt/homebrew/bin",
+        "/usr/local/bin",
+        path.join(homeDir, ".volta", "bin"),
+        path.join(homeDir, ".asdf", "shims"),
+        path.join(homeDir, ".fnm", "aliases", "default", "bin"),
+        path.join(homeDir, "Library", "Application Support", "fnm", "aliases", "default", "bin"),
+        path.join(homeDir, ".local", "share", "mise", "shims"),
+        "/usr/bin",
+      ].join(":"));
+      expect(desktopToolPath({
+        platform: "win32",
+        home: "C:\\Users\\example",
+        pathEnv: "C:\\Windows\\System32",
+        env: { APPDATA: "C:\\Users\\example\\AppData\\Roaming", PROGRAMFILES: "C:\\Program Files" },
+        exists: (dir) => dir === "C:\\Program Files\\nodejs",
+        readFile: () => { throw new Error("ENOENT"); },
+      })).toBe("C:\\Program Files\\nodejs;C:\\Windows\\System32");
+      expect(desktopToolPath({
+        platform: "darwin",
+        home: homeDir,
+        pathEnv: "/usr/bin",
+        exists: () => false,
+        readFile: () => "../v1.2.3",
+      })).toBe("/usr/bin");
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
   });
 
   test("maps auth, missing binaries, and strips home paths from details", () => {
@@ -677,9 +814,11 @@ describe("ACP stdio session", () => {
       await chmod(wrapper, 0o755);
       const { spawn } = await import("node:child_process");
       const spawned = [];
+      const processDiagnostics = [];
       const runtime = createAcpHostRuntime({
         platform: "darwin",
         env: {},
+        onProcessDiagnostic: (event) => processDiagnostics.push(event),
         readProxy: () => "HTTPEnable : 1\nHTTPProxy : 127.0.0.1\nHTTPPort : 10808\nHTTPSEnable : 1\nHTTPSProxy : 127.0.0.1\nHTTPSPort : 10809\nSOCKSEnable : 1",
         spawnImpl(command, args, options) {
           spawned.push({ command, args, cwd: options.cwd, shell: options.shell, httpProxy: options.env?.HTTP_PROXY, httpsProxy: options.env?.HTTPS_PROXY });
@@ -704,6 +843,10 @@ describe("ACP stdio session", () => {
       expect(report.newSession.mcpServers).toEqual([]);
       const pid = Number(await readFile(`${reportPath}.pid`, "utf8"));
       await waitUntilExited(pid);
+      expect(processDiagnostics).toEqual([
+        { event: "spawned", requestId: "probe-antigravity", pid },
+        { event: "exited", requestId: "probe-antigravity", pid, code: null, signal: "SIGTERM" },
+      ]);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
@@ -1069,6 +1212,136 @@ describe("ACP stdio session", () => {
     } finally { await rm(directory, { recursive: true, force: true }); }
   }, 10_000);
 
+  const codeBuddyRuntime = (scriptPath, extra = {}) => {
+    const opened = [];
+    const diagnostics = [];
+    const runtime = createAcpHostRuntime({
+      openExternal: (url) => { opened.push(url); },
+      onDiagnostic: (event) => diagnostics.push(event),
+      adapterManager: { get: (id) => id === "codebuddy" ? { command: { command: process.execPath, args: [scriptPath], unsetEnv: ["CODEBUDDY_INTERNET_ENVIRONMENT", "CODEBUDDY_INTERNET_ENVIROMENT"] } } : null },
+      ...extra,
+    });
+    return { runtime, opened, diagnostics };
+  };
+  const loginLink = "https://copilot.tencent.com/login?state=private-login-state";
+  const waitFor = async (check, timeoutMs = 5_000) => {
+    const started = Date.now();
+    while (!(await check())) {
+      if (Date.now() - started > timeoutMs) throw new Error("timed out waiting");
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  };
+
+  sessionTest("CodeBuddy reports success only after a fresh process restores the account", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "edgeever-acp-codebuddy-login-"));
+    const reportPath = path.join(directory, "report.json");
+    try {
+      const scriptPath = await writeFakeAgent(directory, { reportPath, advertiseAuth: true, authMethodId: "internal", codeBuddy: { persist: true, authUrls: [loginLink] } });
+      const { runtime, opened, diagnostics } = codeBuddyRuntime(scriptPath);
+      // The CLI starts a session without an account; EdgeEver must still call it signed out.
+      expect(await runtime.probeAdapter({ id: "codebuddy" })).toMatchObject({ state: "needs_login", authMethods: [{ id: "internal", name: "Browser" }] });
+      expect(await runtime.authenticateAdapter({ id: "codebuddy", methodId: "internal" })).toMatchObject({ state: "available" });
+      // A second, fresh process must restore the account before success is reported.
+      const sessions = (await readFile(`${reportPath}.sessions`, "utf8")).trim().split("\n");
+      expect(sessions).toHaveLength(2);
+      expect(new Set(sessions).size).toBe(2);
+      expect(sessions[1]).toBe((await readFile(`${reportPath}.pid`, "utf8")).trim());
+      expect(await runtime.probeAdapter({ id: "codebuddy" })).toMatchObject({ state: "available" });
+      // The CLI opens the browser itself; EdgeEver opens nothing on its own.
+      expect(opened).toEqual([]);
+      expect(runtime.reopenLoginPage("codebuddy")).toEqual({ opened: false });
+      expect(JSON.stringify(diagnostics)).not.toContain("private-login-state");
+    } finally { await rm(directory, { recursive: true, force: true }); }
+  }, 15_000);
+
+  for (const [name, codeBuddy] of [
+    ["an account without a token", { persist: true, tokenless: true }],
+    ["a login the next process cannot restore", { persist: true, forgetAfterLogin: true }],
+  ]) sessionTest(`CodeBuddy treats ${name} as signed out`, async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "edgeever-acp-codebuddy-signed-out-"));
+    const reportPath = path.join(directory, "report.json");
+    try {
+      const scriptPath = await writeFakeAgent(directory, { reportPath, advertiseAuth: true, authMethodId: "internal", codeBuddy });
+      const { runtime } = codeBuddyRuntime(scriptPath);
+      expect(await runtime.authenticateAdapter({ id: "codebuddy", methodId: "internal" })).toMatchObject({
+        state: "needs_login", detail: "authentication_failed", authMethods: [{ id: "internal", name: "Browser" }],
+      });
+      expect(await runtime.probeAdapter({ id: "codebuddy" })).toMatchObject({ state: "needs_login" });
+      const events = [];
+      await runtime.prompt({ adapterId: "codebuddy", prompt: "hello", noteAccess: false }, (event) => events.push(event));
+      expect(events).toMatchObject([{ type: "error", message: "needs_login" }]);
+    } finally { await rm(directory, { recursive: true, force: true }); }
+  }, 15_000);
+
+  sessionTest("CodeBuddy sign-in keeps only verified links, throttles reopening and can be cancelled", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "edgeever-acp-codebuddy-cancel-"));
+    const reportPath = path.join(directory, "report.json");
+    try {
+      const scriptPath = await writeFakeAgent(directory, {
+        reportPath, advertiseAuth: true, hangAuth: true, authMethodId: "external",
+        codeBuddy: { authUrls: [loginLink, "https://evil.example/login?state=leak", "http://www.codebuddy.ai/login", "https://www.codebuddy.ai/login?state=private-login-state", "https://www.codebuddy.ai/login?state=private-login-state"] },
+      });
+      const { runtime, opened, diagnostics } = codeBuddyRuntime(scriptPath);
+      expect(runtime.cancelAuthentication("codebuddy")).toEqual({ cancelled: false });
+      const pending = runtime.authenticateAdapter({ id: "codebuddy", methodId: "external" });
+      await waitFor(() => diagnostics.filter((event) => event.message === "codebuddy_login_url_rejected").length === 2);
+      await waitFor(() => runtime.reopenLoginPage("codebuddy").opened);
+      // Repeated notifications and clicks inside the interval do not open more pages.
+      expect(runtime.reopenLoginPage("codebuddy")).toEqual({ opened: false });
+      expect(opened).toEqual(["https://www.codebuddy.ai/login?state=private-login-state"]);
+      expect(runtime.reopenLoginPage("claudeCode")).toEqual({ opened: false });
+      expect(runtime.cancelAuthentication("claudeCode")).toEqual({ cancelled: false });
+      const pid = Number(await readFile(`${reportPath}.pid`, "utf8"));
+      expect(runtime.cancelAuthentication("codebuddy")).toEqual({ cancelled: true });
+      expect(await pending).toMatchObject({ state: "needs_login", detail: "authentication_cancelled", authMethods: [{ id: "external", name: "Browser" }] });
+      await waitFor(() => { try { process.kill(pid, 0); return false; } catch { return true; } });
+      expect(runtime.cancelAuthentication("codebuddy")).toEqual({ cancelled: false });
+      expect(runtime.reopenLoginPage("codebuddy")).toEqual({ opened: false });
+      const logged = JSON.stringify(diagnostics);
+      expect(logged).not.toContain("private-login-state");
+      expect(logged).not.toContain("evil.example");
+      expect((await readReport(reportPath)).newSession).toBeNull();
+    } finally { await rm(directory, { recursive: true, force: true }); }
+  }, 15_000);
+
+  sessionTest("CodeBuddy cancel during the post-login check is reported as cancelled", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "edgeever-acp-codebuddy-cancel-check-"));
+    const reportPath = path.join(directory, "report.json");
+    try {
+      const scriptPath = await writeFakeAgent(directory, { reportPath, advertiseAuth: true, authMethodId: "internal", codeBuddy: { persist: true, slowRestore: true } });
+      const { runtime } = codeBuddyRuntime(scriptPath);
+      const pending = runtime.authenticateAdapter({ id: "codebuddy", methodId: "internal" });
+      // The login process has saved the account; the fresh check process is still restoring it.
+      await waitFor(async () => (await readFile(`${reportPath}.sessions`, "utf8").catch(() => "")).trim().split("\n").filter(Boolean).length === 1
+        && (await readFile(`${reportPath}.pid`, "utf8").catch(() => "")) !== (await readFile(`${reportPath}.sessions`, "utf8")).trim());
+      expect(runtime.cancelAuthentication("codebuddy")).toEqual({ cancelled: true });
+      expect(await pending).toMatchObject({ state: "needs_login", detail: "authentication_cancelled" });
+    } finally { await rm(directory, { recursive: true, force: true }); }
+  }, 15_000);
+
+  sessionTest("CodeBuddy sign-in that never finishes ends as a timeout", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "edgeever-acp-codebuddy-timeout-"));
+    const reportPath = path.join(directory, "report.json");
+    try {
+      const scriptPath = await writeFakeAgent(directory, { reportPath, advertiseAuth: true, hangAuth: true, authMethodId: "internal", codeBuddy: { authUrls: [loginLink] } });
+      const { runtime } = codeBuddyRuntime(scriptPath, { authenticationTimeoutMs: 1_500 });
+      expect(await runtime.authenticateAdapter({ id: "codebuddy", methodId: "internal" })).toMatchObject({ state: "needs_login", detail: "authentication_timeout" });
+      expect(runtime.reopenLoginPage("codebuddy")).toEqual({ opened: false });
+    } finally { await rm(directory, { recursive: true, force: true }); }
+  }, 10_000);
+
+  sessionTest("other agents ignore CodeBuddy login links", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "edgeever-acp-codebuddy-other-"));
+    const reportPath = path.join(directory, "report.json");
+    try {
+      const scriptPath = await writeFakeAgent(directory, { reportPath, requireAuth: true, codeBuddy: { authUrls: [loginLink] } });
+      const opened = [];
+      const runtime = createAcpHostRuntime({ openExternal: (url) => { opened.push(url); } });
+      expect(await runtime.authenticateAdapter({ id: "antigravity", path: scriptPath, methodId: "browser" })).toMatchObject({ state: "available" });
+      expect(opened).toEqual([]);
+    } finally { await rm(directory, { recursive: true, force: true }); }
+  }, 10_000);
+
   for (const adapterId of ["workbuddyIntl", "workbuddyCn"]) for (const loginFailure of [false, true]) sessionTest(`${adapterId} account login ${loginFailure ? "returns failure without hanging" : "verifies ACP session without the broken authenticate RPC"}`, async () => {
     const directory = await mkdtemp(path.join(tmpdir(), "edgeever-acp-workbuddy-auth-"));
     const reportPath = path.join(directory, "report.json");
@@ -1298,6 +1571,301 @@ describe("ACP stdio session", () => {
       await rm(directory, { recursive: true, force: true });
     }
   }, 15_000);
+
+  const chat = "11111111-1111-4111-8111-111111111111";
+  const otherChat = "22222222-2222-4222-8222-222222222222";
+
+  sessionTest("reuses one ACP process for the same chat and omits replayed history", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "edgeever-acp-warm-"));
+    const reportPath = path.join(directory, "report.json");
+    let closed = false;
+    const runtime = createAcpHostRuntime({
+      mcpAccess: () => ({ baseUrl: "https://notes.example", sessionToken: "login-secret", accountId: "account-a" }),
+      startMcpBridge: () => ({
+        url: "http://127.0.0.1:12345",
+        secret: "temporary-secret",
+        close: async () => { closed = true; },
+      }),
+    });
+    try {
+      const scriptPath = await writeFakeAgent(directory, {
+        reportPath,
+        secretPath: path.join(directory, "secret.txt"),
+        allowImage: false,
+        allowEmbedded: false,
+        hold: false,
+      });
+      const prompt = (text, events) => runtime.prompt({
+        adapterId: "antigravity",
+        path: scriptPath,
+        prompt: text,
+        sessionKey: chat,
+        contextText: "Current note",
+        historyText: "Earlier turns",
+      }, events.emit);
+      const firstEvents = collector();
+      const first = await prompt("hello", firstEvents);
+      await firstEvents.waitFor((event) => event.type === "done" && event.requestId === first.requestId);
+      const pid = Number(await readFile(`${reportPath}.pid`, "utf8"));
+      expect(processAlive(pid)).toBe(true);
+      expect(closed).toBe(false);
+      const secondEvents = collector();
+      const second = await prompt("again", secondEvents);
+      const delta = await secondEvents.waitFor((event) => event.type === "text-delta");
+      expect(delta).toEqual({ requestId: second.requestId, type: "text-delta", text: "hello from agent" });
+      expect(secondEvents.events.some((event) => event.requestId === first.requestId)).toBe(false);
+      await secondEvents.waitFor((event) => event.type === "done");
+      expect(Number(await readFile(`${reportPath}.pid`, "utf8"))).toBe(pid);
+      expect(processAlive(pid)).toBe(true);
+      const report = await readReport(reportPath);
+      expect(report.sessionCount).toBe(1);
+      expect(report.prompts).toHaveLength(2);
+      expect(JSON.stringify(report.prompts[0])).toContain("edgeever-current-workspace");
+      expect(JSON.stringify(report.prompts[0])).toContain("Earlier turns");
+      expect(JSON.stringify(report.prompts[1])).not.toContain("edgeever-current-workspace");
+      expect(JSON.stringify(report.prompts[1])).not.toContain("Earlier turns");
+      expect(JSON.stringify(report.prompts[1])).toContain("Current note");
+      expect(closed).toBe(false);
+      await runtime.releaseWarmSessions();
+      await waitUntilExited(pid);
+      expect(closed).toBe(true);
+    } finally {
+      await runtime.releaseWarmSessions();
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 15_000);
+
+  sessionTest("keeps a cancelled chat process and rejects an overlapping prompt", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "edgeever-acp-warm-cancel-"));
+    const reportPath = path.join(directory, "report.json");
+    const runtime = createAcpHostRuntime();
+    try {
+      const scriptPath = await writeFakeAgent(directory, {
+        reportPath,
+        secretPath: path.join(directory, "secret.txt"),
+        allowImage: false,
+        allowEmbedded: false,
+        hold: true,
+      });
+      const events = collector();
+      const first = await runtime.prompt({
+        adapterId: "antigravity",
+        path: scriptPath,
+        prompt: "wait",
+        sessionKey: chat,
+        historyText: "Earlier turns",
+      }, events.emit);
+      await events.waitFor((event) => event.type === "text-delta");
+      const overlap = collector();
+      const second = await runtime.prompt({
+        adapterId: "antigravity",
+        path: scriptPath,
+        prompt: "too soon",
+        sessionKey: chat,
+      }, overlap.emit);
+      expect(await overlap.waitFor((event) => event.type === "error")).toEqual({ requestId: second.requestId, type: "error", message: "session_busy" });
+      expect(await runtime.cancel(first.requestId)).toEqual({ ok: true });
+      await events.waitFor((event) => event.type === "done");
+      const pid = Number(await readFile(`${reportPath}.pid`, "utf8"));
+      expect(processAlive(pid)).toBe(true);
+      const continued = collector();
+      const third = await runtime.prompt({
+        adapterId: "antigravity",
+        path: scriptPath,
+        prompt: "continue",
+        sessionKey: chat,
+        historyText: "Earlier turns",
+      }, continued.emit);
+      expect((await continued.waitFor((event) => event.type === "text-delta")).requestId).toBe(third.requestId);
+      await continued.waitFor((event) => event.type === "done");
+      const report = await readReport(reportPath);
+      expect(report.sessionCount).toBe(1);
+      expect(report.prompts).toHaveLength(2);
+      expect(JSON.stringify(report.prompts[1])).not.toContain("Earlier turns");
+      expect(processAlive(pid)).toBe(true);
+    } finally {
+      await runtime.releaseWarmSessions();
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 15_000);
+
+  sessionTest("starts a separate process for another chat or another account", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "edgeever-acp-warm-reset-"));
+    const reportPath = path.join(directory, "report.json");
+    let accountId = "account-a";
+    const runtime = createAcpHostRuntime({
+      warmSessionLimit: 3,
+      mcpAccess: () => ({ baseUrl: "https://notes.example", sessionToken: "login-secret", accountId }),
+      startMcpBridge: () => ({ url: "http://127.0.0.1:12345", secret: "temporary-secret", close: async () => {} }),
+    });
+    try {
+      const scriptPath = await writeFakeAgent(directory, {
+        reportPath,
+        secretPath: path.join(directory, "secret.txt"),
+        allowImage: false,
+        allowEmbedded: false,
+        hold: false,
+      });
+      const send = async (sessionKey) => {
+        const events = collector();
+        await runtime.prompt({
+          adapterId: "antigravity",
+          path: scriptPath,
+          prompt: "hello",
+          sessionKey,
+          historyText: "Earlier turns",
+        }, events.emit);
+        await events.waitFor((event) => event.type === "done");
+        return Number(await readFile(`${reportPath}.pid`, "utf8"));
+      };
+      const firstPid = await send(chat);
+      const secondPid = await send(otherChat);
+      expect(secondPid).not.toBe(firstPid);
+      expect(processAlive(firstPid)).toBe(true);
+      expect(processAlive(secondPid)).toBe(true);
+      accountId = "account-b";
+      const switchedPid = await send(chat);
+      expect(switchedPid).not.toBe(firstPid);
+      expect(processAlive(firstPid)).toBe(false);
+      expect(processAlive(secondPid)).toBe(true);
+      expect(JSON.stringify((await readReport(reportPath)).prompts.at(-1))).toContain("Earlier turns");
+    } finally {
+      await runtime.releaseWarmSessions();
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 15_000);
+
+  sessionTest("starts over after the chat process has been idle", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "edgeever-acp-warm-idle-"));
+    const reportPath = path.join(directory, "report.json");
+    const runtime = createAcpHostRuntime({ warmIdleMs: 80 });
+    try {
+      const scriptPath = await writeFakeAgent(directory, {
+        reportPath,
+        secretPath: path.join(directory, "secret.txt"),
+        allowImage: false,
+        allowEmbedded: false,
+        hold: false,
+      });
+      const send = async () => {
+        const events = collector();
+        await runtime.prompt({
+          adapterId: "antigravity",
+          path: scriptPath,
+          prompt: "hello",
+          sessionKey: chat,
+          historyText: "Earlier turns",
+        }, events.emit);
+        await events.waitFor((event) => event.type === "done");
+        return Number(await readFile(`${reportPath}.pid`, "utf8"));
+      };
+      const firstPid = await send();
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      await waitUntilExited(firstPid);
+      const secondPid = await send();
+      expect(secondPid).not.toBe(firstPid);
+      expect(JSON.stringify((await readReport(reportPath)).prompt)).toContain("Earlier turns");
+    } finally {
+      await runtime.releaseWarmSessions();
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 15_000);
+
+  sessionTest("a read-only turn does not continue inside the note-writing process", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "edgeever-acp-warm-readonly-"));
+    const reportPath = path.join(directory, "report.json");
+    const runtime = createAcpHostRuntime({
+      mcpAccess: () => ({ baseUrl: "https://notes.example", sessionToken: "login-secret", accountId: "account-a" }),
+      startMcpBridge: () => ({ url: "http://127.0.0.1:12345", secret: "temporary-secret", close: async () => {} }),
+    });
+    try {
+      const scriptPath = await writeFakeAgent(directory, {
+        reportPath,
+        secretPath: path.join(directory, "secret.txt"),
+        allowImage: false,
+        allowEmbedded: false,
+        hold: false,
+      });
+      const send = async ({ noteAccess = true } = {}) => {
+        const events = collector();
+        await runtime.prompt({
+          adapterId: "antigravity",
+          path: scriptPath,
+          prompt: "hello",
+          sessionKey: chat,
+          historyText: "Earlier turns",
+          noteAccess,
+        }, events.emit);
+        await events.waitFor((event) => event.type === "done");
+        return Number(await readFile(`${reportPath}.pid`, "utf8"));
+      };
+      const writingPid = await send();
+      const readingPid = await send({ noteAccess: false });
+      expect(readingPid).not.toBe(writingPid);
+      expect(processAlive(writingPid)).toBe(false);
+      expect(JSON.stringify((await readReport(reportPath)).newSession.mcpServers)).toBe("[]");
+      const resumedPid = await send();
+      expect(resumedPid).not.toBe(readingPid);
+      expect(processAlive(readingPid)).toBe(false);
+      expect(JSON.stringify((await readReport(reportPath)).prompt)).toContain("Earlier turns");
+      expect(JSON.stringify((await readReport(reportPath)).newSession.mcpServers)).toContain("edgeever-current-workspace");
+    } finally {
+      await runtime.releaseWarmSessions();
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 15_000);
+
+  sessionTest("starts one ACP process for a prepared chat and keeps it for the next turn", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "edgeever-acp-prepare-"));
+    const reportPath = path.join(directory, "report.json");
+    const runtime = createAcpHostRuntime();
+    try {
+      const scriptPath = await writeFakeAgent(directory, {
+        reportPath,
+        secretPath: path.join(directory, "secret.txt"),
+        allowImage: false,
+        allowEmbedded: false,
+        hold: false,
+      });
+      const input = {
+        adapterId: "antigravity",
+        path: scriptPath,
+        sessionKey: chat,
+        historyText: "Earlier turns",
+        noteAccess: false,
+      };
+      const preparing = runtime.prepare(input);
+      const events = collector();
+      const sent = runtime.prompt({ ...input, prompt: "hello" }, events.emit);
+      expect(await preparing).toEqual({ ready: true });
+      await sent;
+      await events.waitFor((event) => event.type === "done");
+      expect((await readFile(`${reportPath}.sessions`, "utf8")).trim().split("\n")).toEqual([
+        String(Number(await readFile(`${reportPath}.pid`, "utf8"))),
+      ]);
+      const report = await readReport(reportPath);
+      expect(report.sessionCount).toBe(1);
+      expect(JSON.stringify(report.prompt)).toContain("Earlier turns");
+      const again = collector();
+      await runtime.prompt({ ...input, prompt: "next" }, again.emit);
+      await again.waitFor((event) => event.type === "done");
+      const continued = await readReport(reportPath);
+      expect(continued.sessionCount).toBe(1);
+      expect(continued.prompts).toHaveLength(2);
+      expect(JSON.stringify(continued.prompts[1])).not.toContain("Earlier turns");
+      expect((await readFile(`${reportPath}.sessions`, "utf8")).trim().split("\n")).toHaveLength(1);
+    } finally {
+      await runtime.releaseWarmSessions();
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 15_000);
+
+  sessionTest("rejects a session key that is not a chat id before starting an agent", async () => {
+    const runtime = createAcpHostRuntime();
+    const events = collector();
+    const result = await runtime.prompt({ adapterId: "codex", prompt: "hello", sessionKey: "../secret" }, events.emit);
+    expect(await events.waitFor((event) => event.type === "error")).toEqual({ requestId: result.requestId, type: "error", message: "invalid_session" });
+  });
 });
 
 test("desktop preload and main process expose the ACP host", async () => {
@@ -1307,16 +1875,24 @@ test("desktop preload and main process expose the ACP host", async () => {
     Bun.file(new URL("./acp-host.mjs", import.meta.url)).text(),
   ]);
   expect(main).toContain("registerAcpIpc(ipcMain, createAcpHostRuntime({");
+  expect(main).toContain("await releaseDesktopAcpSessions().catch(() => {});");
   expect(preload).toContain('installAcpAdapter: (id) => ipcRenderer.invoke("desktop:acp-install", id)');
   expect(preload).toContain('authenticateAcpAdapter: (input) => ipcRenderer.invoke("desktop:acp-authenticate", input)');
   expect(host).toContain('ipcMain.handle("desktop:acp-prompt"');
   expect(preload).toContain('listAcpAdapters: () => ipcRenderer.invoke("desktop:acp-list")');
   expect(preload).toContain('probeAcpAdapter: (input) => ipcRenderer.invoke("desktop:acp-probe", input)');
+  expect(preload).toContain('prepareAcp: (input) => ipcRenderer.invoke("desktop:acp-prepare", input)');
   expect(preload).toContain('promptAcp: (input) => ipcRenderer.invoke("desktop:acp-prompt", input)');
   expect(preload).toContain('cancelAcp: (requestId) => ipcRenderer.invoke("desktop:acp-cancel", requestId)');
   expect(preload).toContain('ipcRenderer.on("desktop:acp-event"');
+  expect(preload).toContain('cancelAcpAuthentication: (id) => ipcRenderer.invoke("desktop:acp-cancel-auth", id)');
+  expect(preload).toContain('reopenAcpLoginPage: (id) => ipcRenderer.invoke("desktop:acp-reopen-login", id)');
+  expect(main).toContain("openExternal: (url) => shell.openExternal(url)");
   const handlers = new Map();
   registerAcpIpc({ handle: (channel, handler) => handlers.set(channel, handler) });
-  expect([...handlers.keys()]).toEqual(["desktop:acp-list", "desktop:acp-choose-path", "desktop:acp-probe", "desktop:acp-install", "desktop:acp-authenticate", "desktop:acp-prompt", "desktop:acp-cancel"]);
+  expect([...handlers.keys()]).toEqual(["desktop:acp-list", "desktop:acp-choose-path", "desktop:acp-probe", "desktop:acp-install", "desktop:acp-authenticate", "desktop:acp-cancel-auth", "desktop:acp-reopen-login", "desktop:acp-prepare", "desktop:acp-prompt", "desktop:acp-cancel"]);
   await expect(handlers.get("desktop:acp-prompt")({ sender: {} }, { prompt: "test" })).rejects.toThrow("acp_prompt_forbidden");
+  // Sign-in controls follow the same sender check as starting a sign-in.
+  expect(() => handlers.get("desktop:acp-cancel-auth")({ sender: {} }, "codebuddy")).toThrow("adapter_auth_forbidden");
+  expect(() => handlers.get("desktop:acp-reopen-login")({ sender: {} }, "codebuddy")).toThrow("adapter_auth_forbidden");
 });

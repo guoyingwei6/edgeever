@@ -1,10 +1,10 @@
 export const jaSiteTagline =
-  "オープンソース、AI ネイティブ、Cloudflare 無料枠 / Docker で自前運用できる Evernote 代替ノート";
+  "AI ネイティブノートアプリ、瞬時マルチデバイス同期＆ネイティブ MCP を備えた Evernote / Obsidian 代替ツール。Cloudflare 無料運用または Docker 自前運用";
 
 export const jaSiteCopy = {
   layout: {
     defaultDescription:
-      "EdgeEver はオープンソースで AI ネイティブな、セルフホスト型のノートと知識ベースです。Evernote の三ペインを残しつつ、ローカル ACP Agent 連携、伴走サイドバー、図解ノート、マルチ端末同期を備え、macOS、Windows、Linux、iOS、Android、ブラウザ Clipper に対応。Cloudflare の無料枠または Docker で同じアプリを動かせます。",
+      "EdgeEver はオープンソースで AI ネイティブな、セルフホスト型のノートと知識ベースです。クラシックな三ペイン（ツリー階層・ノート一覧・エディタ）の高い作業効率を活かしつつ、ローカル ACP Agent 連携、伴走サイドバー、図解ノート、マルチ端末同期を備え、macOS、Windows、Linux、iOS、Android、ブラウザ Clipper に対応。Cloudflare の無料枠または Docker で同じアプリを動かせます。",
     defaultTitle: `EdgeEver - ${jaSiteTagline}`,
     imageAlt: "EdgeEver ノートアプリのスクリーンショット",
     ogLocale: "ja_JP",
@@ -18,10 +18,12 @@ export const jaSiteCopy = {
     dockerDeploy: "Docker",
     selfHostedAlternative: "Evernote 代替",
     migration: "Evernote から移行",
+    noteMigration: "ノート移行ガイド",
     evernoteMigration: "Evernote から移行",
     memosMigration: "Memos から移行",
     notionMigration: "Notion から移行",
     flomoMigration: "Flomo から移行",
+    bestPractices: "実機デモ",
     advancedPlay: "AI Agent の使い方",
     blog: "ブログ",
     backToBlog: "ブログ一覧へ",
@@ -38,13 +40,15 @@ export const jaSiteCopy = {
   },
   hero: {
     slogan: jaSiteTagline,
-    popHighlight: "オープンソースの Evernote 代替 · ネイティブ AI 連携 · 全プラットフォーム対応",
+    popHighlight: "クラシックな三ペインの現代的知識ベース · ネイティブ AI 連携 · 全プラットフォーム対応",
     demo: "ライブデモ",
     agentInstall: "AI で導入",
     getApps: "アプリ：",
     clipper: "Web Clipper",
     windows: "Windows",
     linux: "Linux",
+    migrationTitle: "他社ノートからの移行",
+    migrationSubtitle: "Evernote、Obsidian、Joplinの直接取り込みやNotion、flomoの移行に対応",
     imageAlt: "EdgeEver のプレビュー",
     badgeText:
       "💡 対応: macOS、Windows、Linux、iOS、Android、Web Clipper · ネイティブ MCP & ACP 連携 · Cloudflare 無料枠と Docker",
@@ -54,10 +58,11 @@ export const jaSiteCopy = {
     heading: "セルフホストの知識管理と AI のために作り直した",
     subheading:
       "広告、端末数の制限、高いサブスクはやめましょう。速さ、開放性、自分で守れるプライバシーを前提にしています。",
+    showcaseCta: "20 の実機デモとベストプラクティスを見る",
     card1: {
       badge: "クラシック UI",
       title: "三ペインはそのまま、より軽く速く",
-      desc: "ノートブックツリー、ノート一覧、編集エリアを残しています。リッチテキストと Markdown を切り替えられ、入れ子、全画面フォーカス、明暗カスタム CSS プリセットにも対応。",
+      desc: "クラシックで高効率な三ペインの作業体験（ツリー階層・ノート一覧・エディタ）を継承。リッチテキストと Markdown を切り替えられ、入れ子、全画面フォーカス、明暗カスタム CSS プリセットにも対応。",
       subBadge: "両ビュー / フォーカス / カスタム CSS",
       treeTitle: "ノートブック",
       folder1: "01_Work_Inbox",
@@ -70,7 +75,7 @@ export const jaSiteCopy = {
       note2Title: "ローカル ACP Agent 連携",
       note2Sub: "Codex / Antigravity 協調...",
       editorTitle: "EdgeEver Architecture",
-      editorBody: "EdgeEver は Evernote の三ペインに、AI Agent 連携と柔軟な導入を足したものです。",
+      editorBody: "EdgeEver はクラシックな三ペインに、AI Agent 連携と柔軟な導入を足したものです。",
       editorSaveTag: "SQLite に自動保存",
     },
     card2: {
@@ -113,8 +118,8 @@ export const jaSiteCopy = {
     },
   },
   marquee: {
-    title: "全プラットフォーム、柔軟な導入、AI 連携",
-    subtitle: "macOS、ネイティブ iOS / Android から Docker 自前運用、発信向けコピー、Remote MCP まで。",
+    title: "ネイティブ設計、柔軟な導入、AI 連携エコシステム",
+    subtitle: "ローカル SQLite 同期や ACP / Remote MCP 連携から Docker 自前運用、発信向け整形まで。",
     items: [
       {
         tag: "macOS Desktop",
@@ -212,7 +217,7 @@ export const jaSiteCopy = {
       },
       {
         title: "クラシックな三ペイン、フォーカスモード、外観設定",
-        summary: "ノートブックツリー、ノート一覧、編集エリアを残し、リッチテキスト、Markdown、外観カスタムを両立します。",
+        summary: "クラシックな三ペイン（ツリー階層・ノート一覧・エディタ）を残し、リッチテキスト、Markdown、外観カスタムを両立します。",
         points: [
           "長期の知識ベース向けに、入れ子のノートブックは制限しません。",
           "デスクトップの全画面フォーカス、ノートブックのドラッグ並べ替え、複数ノートの一括移動や結合。",
@@ -265,10 +270,16 @@ export const jaSiteCopy = {
         cta: "導入ガイドを読む",
       },
       {
-        title: "Evernote から移行する",
-        summary: "EdgeEver MCP、evernote-backup、ENEX 取り込みで、古いライブラリを自前インスタンスへ。",
-        href: "/blog/evernote-migration-guide",
+        title: "サードパーティ製ノートの移行",
+        summary: "Evernote、Obsidian、Joplin のネイティブインポート、または AI Agent (MCP) を使用した Notion、flomo、Memos の移行。",
+        href: "/blog/note-migration-guide",
         cta: "移行ガイドを読む",
+      },
+      {
+        title: "20 の実機デモとベストプラクティス",
+        summary: "三ペイン執筆、マルチチャネル取り込み、AI 図解・多次元テーブル、ローカル ACP 連携、ポスター作成の実機例。",
+        href: "/guides/best-practices",
+        cta: "実機デモを見る",
       },
       {
         title: "AI Agent の応用",

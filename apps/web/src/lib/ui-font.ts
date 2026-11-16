@@ -1,3 +1,7 @@
+import { watchUiCatalogFont } from "./editor-catalog-fonts";
+import { isRemoteNoteImageFont } from "@edgeever/shared/font-catalog-data";
+import { LEGACY_BODY_FONTS } from "@edgeever/shared/font-defaults";
+import type { BodyFontId } from "@edgeever/shared/font-loader";
 import {
   type EditorBodyFontChoice,
   type EditorBodyFontPreference,
@@ -47,6 +51,7 @@ export const writeUiFontPreference = (preference: UiFontPreference) => {
 export const applyUiFontPreference = (preference = readUiFontPreference()) => {
   if (typeof document === "undefined") return;
   const root = document.documentElement;
+  watchUiCatalogFont(isRemoteNoteImageFont(preference.choice) || preference.choice in LEGACY_BODY_FONTS ? preference.choice as BodyFontId : undefined);
   const stack = resolveEditorBodyFontStack(preference);
   if (!stack) {
     delete root.dataset.uiFont;

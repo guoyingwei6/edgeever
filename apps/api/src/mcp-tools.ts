@@ -1,5 +1,5 @@
 import { posterPatchInputSchema, posterOperationsInputSchema } from "./mcp-poster-schema";
-import { ARCHITECTURE_RESOURCE_ICONS, INFOGRAPHIC_NOTE_TEMPLATES, POSTER_FORMATS, POSTER_TEMPLATES, TABLE_FIELD_TYPES } from "@edgeever/shared";
+import { ARCHITECTURE_RESOURCE_ICONS, INFOGRAPHIC_NOTE_TEMPLATES, POSTER_FORMATS, POSTER_TEMPLATES, POSTER_TEMPLATE_SELECTION_INSTRUCTION, TABLE_FIELD_TYPES } from "@edgeever/shared";
 
 const DIAGRAM_IR_NODE_TYPES = [
   "topic",
@@ -157,7 +157,7 @@ const MCP_TOOL_DEFINITIONS = [
   },
   {
     name: "search_memos",
-    description: "Search active EdgeEver memos by text, tag, notebook, time range, pin state, resource presence, or poster type. Use poster=true to find editable poster notes (海报笔记); do not search for the word 海报 to identify the type. query is optional. For recently created or added notes, pass createdAfter and omit query; do not put this week/最近/新增 in query. Time bounds accept YYYY-MM-DD or ISO date-time.",
+    description: "Search active EdgeEver memos by text, tag, notebook, time range, pin state, resource presence, or poster type. Results retain their excerpt and add a snippet of up to 200 characters when the query or its terms can be located in the body. Snippets may omit surrounding conditions; read the memo when more context is needed. Use poster=true to find editable poster notes (海报笔记); do not search for the word 海报 to identify the type. query is optional. For recently created or added notes, pass createdAfter and omit query; do not put this week/最近/新增 in query. Time bounds accept YYYY-MM-DD or ISO date-time.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -178,7 +178,7 @@ const MCP_TOOL_DEFINITIONS = [
   },
   {
     name: "list_memos",
-    description: "List EdgeEver memos with pagination. Use poster=true to list only editable poster notes (海报笔记), false to exclude them. Use includeContent when full Markdown is needed.",
+    description: 'List EdgeEver memo summaries with pagination. Use poster=true to list only editable poster notes (海报笔记), false to exclude them. With includeContent=true, prose bodies are Markdown only by default. Use format="all" for legacy body fields.',
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -187,6 +187,7 @@ const MCP_TOOL_DEFINITIONS = [
         limit: { type: "integer", minimum: 1, maximum: 100 },
         offset: { type: "integer", minimum: 0 },
         includeContent: { type: "boolean" },
+        format: { type: "string", enum: ["all"], description: "Return Markdown, plain text, and editor JSON for prose when includeContent is true." },
         includeDeleted: { type: "boolean" },
         poster: { type: "boolean", description: "Filter by editable poster type before pagination." },
       },
@@ -194,20 +195,21 @@ const MCP_TOOL_DEFINITIONS = [
   },
   {
     name: "get_memo",
-    description: "Read a memo with Markdown content.",
+    description: 'Read a memo. Prose bodies are Markdown only by default. Use format="all" for legacy body fields. Specialized memos retain their existing responses.',
     inputSchema: {
       type: "object",
       required: ["memoId"],
       additionalProperties: false,
       properties: {
         memoId: { type: "string" },
+        format: { type: "string", enum: ["all"], description: "Return Markdown, plain text, and editor JSON for prose." },
         includeDeleted: { type: "boolean" },
       },
     },
   },
   {
     name: "create_memo",
-    description: "Create a prose Markdown memo in a notebook. For an editable poster/海报笔记, use create_poster_memo instead; never substitute poster-style prose.",
+    description: "Create a prose Markdown memo in a notebook. To include local files, upload them first with create_resource_upload_url, put the returned Markdown in contentMarkdown and pass their resourceIds. For an editable poster/海报笔记, use create_poster_memo instead; never substitute poster-style prose.",
     inputSchema: {
       type: "object",
       required: ["notebookId"],
@@ -219,6 +221,13 @@ const MCP_TOOL_DEFINITIONS = [
         tags: { type: "array", items: { type: "string" } },
         createdAt: { type: "string", format: "date-time" },
         updatedAt: { type: "string", format: "date-time" },
+        resourceIds: {
+          type: "array",
+          maxItems: 20,
+          uniqueItems: true,
+          items: { type: "string" },
+          description: "Pending uploads from create_resource_upload_url to bind to this memo, in the same operation. Requires write:resources.",
+        },
       },
     },
   },
@@ -368,7 +377,7 @@ const MCP_TOOL_DEFINITIONS = [
   },
   {
     name: "create_poster_memo",
-    description: "Create an editable poster note (海报笔记). Use this when asked to generate a poster, not create_memo or update_memo with poster-style prose. First plan the takeaway and content hierarchy. For explanatory topics (industry layouts, knowledge summaries, comparisons or guides), supply 3–6 concise sections with heading/body and choose layout=grid for categories or layout=list for steps. Do not reduce an informative topic to a title and generic subtitle. Use supplied note content when referenced; do not invent statistics, sources or brand relationships. For quotes, slogans or an explicitly minimal cover, omit sections. Choose template deliberately (bold/minimal for technology or business, editorial/quote for literary copy); optional badge/footer require sections. EdgeEver compiles editable elements and fits text to the selected format. Do not inspect other notes or local files to reverse-engineer the poster format. If this tool fails, report the error; never silently substitute an ordinary Markdown note. Use get_poster then update_poster only for subsequent edits.",
+    description: POSTER_TEMPLATE_SELECTION_INSTRUCTION + " Create an editable poster note (海报笔记). Use this when asked to generate a poster, not create_memo or update_memo with poster-style prose. First plan the takeaway and content hierarchy. For explanatory topics (industry layouts, knowledge summaries, comparisons or guides), supply 3–6 concise sections with heading/body and choose layout=grid for categories or layout=list for steps. Do not reduce an informative topic to a title and generic subtitle. Use supplied note content when referenced; do not invent statistics, sources or brand relationships. For quotes, slogans or an explicitly minimal cover, omit sections. Optional badge/footer require sections. EdgeEver compiles editable elements and fits text to the selected format. Do not inspect other notes or local files to reverse-engineer the poster format. If this tool fails, report the error; never silently substitute an ordinary Markdown note. Use get_poster then update_poster only for subsequent edits.",
     inputSchema: {
       type: "object", required: ["notebookId", "title", "heading"], additionalProperties: false,
       properties: {
@@ -378,7 +387,7 @@ const MCP_TOOL_DEFINITIONS = [
         badge: { type: "string", maxLength: 24, description: "Optional short topic label; requires sections." },
         footer: { type: "string", maxLength: 100, description: "Optional takeaway or supplied source; requires sections. Never invent attribution." },
         sections: { type: "array", minItems: 2, maxItems: 6, description: "Main content for informative posters. Each section must convey a distinct useful point, not repeat the subtitle.", items: { type: "object", additionalProperties: false, required: ["heading", "body"], properties: { heading: { type: "string", minLength: 1, maxLength: 32 }, body: { type: "string", minLength: 1, maxLength: 120 } } } },
-        template: { type: "string", enum: [...POSTER_TEMPLATES] },
+        template: { type: "string", enum: [...POSTER_TEMPLATES], description: "Basic server style ID from templates in get_poster_capabilities; select using its zhUse/enUse. Full browser designs use request_poster_render.templateId." },
         format: { type: "string", enum: POSTER_FORMATS.map(format => format.id) },
         tags: { type: "array", maxItems: 100, items: { type: "string" } },
       },
@@ -386,7 +395,7 @@ const MCP_TOOL_DEFINITIONS = [
   },
   {
     name: "request_poster_render",
-    description: "Queue a fresh PNG preview on an online desktop/Web client. Read get_poster and pass expectedRevision. Optional templateId applies a full browser design template, preserving additional decorations; use only for an explicit template change. Requires write:memos and write:resources. Returns a job, not an image. No online client means pending; query get_poster_render_job and only claim rendered after completed, then get_poster_preview. Pending expires after 10 minutes; rendering after 2 minutes. Do not busy-poll.",
+    description: "Queue a fresh PNG preview on an online desktop/Web client. Read get_poster and pass expectedRevision. Optional templateId applies a full browser design template, preserving additional decorations; use for the initial design of a new poster, or an explicitly requested template change to an existing poster. Requires write:memos and write:resources. Returns a job, not an image. No online client means pending; query get_poster_render_job and only claim rendered after completed, then get_poster_preview. Pending expires after 10 minutes; rendering after 2 minutes. Do not busy-poll.",
     inputSchema: { type: "object", required: ["memoId", "expectedRevision"], additionalProperties: false, properties: { memoId: { type: "string", minLength: 1 }, expectedRevision: { type: "integer", minimum: 0 }, templateId: { type: "string", description: "ID from browserDesignTemplates in get_poster_capabilities" } } },
   },
   {
@@ -396,7 +405,7 @@ const MCP_TOOL_DEFINITIONS = [
   },
   {
     name: "get_poster_capabilities",
-    description: "Discover supported poster templates, fonts, platform dimensions, limits, detailed editing fields, operations and rendering/export availability. Read before designing or guessing parameter values.",
+    description: "Read before creating a poster. Discover supported poster templates with bilingual zhUse/enUse descriptions and recommended platform IDs (fit), fonts, platform dimensions, limits, detailed editing fields, operations and rendering/export availability. Read before designing or guessing parameter values.",
     inputSchema: { type: "object", additionalProperties: false, properties: {} },
   },
   {
@@ -548,7 +557,7 @@ const MCP_TOOL_DEFINITIONS = [
   },
   {
     name: "update_memo",
-    description: "Update memo title, Markdown, tags, notebook, or pinned state. To generate an editable poster/海报笔记, call create_poster_memo; to edit one, use get_poster then update_poster. Never manually encode poster source or replace a poster request with ordinary prose.",
+    description: "Update memo title, Markdown, tags, notebook, or pinned state, and bind pending uploads with resourceIds. To generate an editable poster/海报笔记, call create_poster_memo; to edit one, use get_poster then update_poster. Never manually encode poster source or replace a poster request with ordinary prose.",
     inputSchema: {
       type: "object",
       required: ["memoId"],
@@ -563,6 +572,13 @@ const MCP_TOOL_DEFINITIONS = [
         expectedRevision: { type: "integer", minimum: 0 },
         createdAt: { type: "string", format: "date-time" },
         updatedAt: { type: "string", format: "date-time" },
+        resourceIds: {
+          type: "array",
+          maxItems: 20,
+          uniqueItems: true,
+          items: { type: "string" },
+          description: "Pending uploads from create_resource_upload_url to bind to this memo, in the same operation. Requires write:resources.",
+        },
       },
     },
   },
@@ -678,7 +694,7 @@ const MCP_TOOL_DEFINITIONS = [
   {
     name: "upload_memo_image",
     description:
-      "Upload a base64-encoded image resource to a memo and return Markdown that can be inserted into memo content. Images are stored as provided; server-side compression is disabled to avoid Cloudflare Images quota usage.",
+      "Upload a base64-encoded image resource to a memo and return Markdown that can be inserted into memo content. Images are stored as provided; server-side compression is disabled to avoid Cloudflare Images quota usage. For a file on disk, prefer create_resource_upload_url.",
     inputSchema: {
       type: "object",
       required: ["memoId", "mimeType", "dataBase64"],
@@ -686,15 +702,32 @@ const MCP_TOOL_DEFINITIONS = [
       properties: {
         memoId: { type: "string" },
         filename: { type: "string" },
-        mimeType: { type: "string", enum: ["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"] },
+        mimeType: { type: "string", enum: ["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif", "image/svg+xml"] },
         dataBase64: { type: "string" },
         alt: { type: "string" },
       },
     },
   },
   {
+    name: "create_resource_upload_url",
+    description:
+      "Create a single-use URL to upload a local image or attachment (up to 100 MiB) without sending its bytes through a tool call and without an existing memo. Run the returned curl command from a shell that can read the file, replacing <path-to-file>; the request must send exactly byteSize bytes of mimeType content. The URL expires after 15 minutes. The PUT response contains resourceId, an authenticated url and Markdown; then pass the Markdown in contentMarkdown and the resourceId in resourceIds to create_memo, or to update_memo for an existing memo. Unbound uploads are deleted after 24 hours.",
+    inputSchema: {
+      type: "object",
+      required: ["kind", "mimeType", "byteSize"],
+      additionalProperties: false,
+      properties: {
+        kind: { type: "string", enum: ["image", "attachment"] },
+        mimeType: { type: "string" },
+        filename: { type: "string" },
+        byteSize: { type: "integer", minimum: 1, maximum: 104857600 },
+        label: { type: "string", description: "Image alt text or attachment link label used in the returned Markdown." },
+      },
+    },
+  },
+  {
     name: "upload_memo_attachment",
-    description: "Upload a base64-encoded attachment resource to a memo and return Markdown link text that can be inserted into memo content.",
+    description: "Upload a base64-encoded attachment resource to a memo and return Markdown link text that can be inserted into memo content. For a file on disk, prefer create_resource_upload_url.",
     inputSchema: {
       type: "object",
       required: ["memoId", "filename", "mimeType", "dataBase64"],
@@ -1084,6 +1117,7 @@ const NON_DESTRUCTIVE_MCP_TOOLS = new Set([
   "move_memos",
   "add_tags_to_memos",
   "upload_memo_image",
+  "create_resource_upload_url",
   "upload_memo_attachment",
   "move_notebook",
   "create_notebook",

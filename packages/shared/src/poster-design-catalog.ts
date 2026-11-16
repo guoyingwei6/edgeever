@@ -2,6 +2,15 @@
 // in the existing Qiaomu Design implementation (MIT).
 export const POSTER_DESIGN_TEMPLATES = [
   {
+    "id": "paper-list",
+    "zh": "书页清单",
+    "en": "Bookish list",
+    "fit": ["xhs", "portrait", "vertical", "xhs-square", "square"],
+    "zhUse": "纸张纹理、淡背景文字、宋体大标题、编号与细横线；适合读书笔记、知识盘点。按空行分条，首行作书名，第二行可用“副标题：”添加副题，其余作正文",
+    "enUse": "Textured ivory paper, faint background lettering, serif headlines, large numbers and fine rules; reading notes and knowledge lists. Separate entries with blank lines: book title first, optional second line starting with “Subtitle:”, then body text",
+    "available": true
+  },
+  {
     "id": "minimal",
     "zh": "简约白",
     "en": "Minimal",
@@ -1007,3 +1016,5 @@ export function posterDesignTemplate(id: string) {
   const { available: _available, ...descriptor } = template;
   return descriptor;
 }
+
+export const POSTER_TEMPLATE_SELECTION_INSTRUCTION = "Before create_poster_memo, call get_poster_capabilities and read templates and browserDesignTemplates. Match zhUse/enUse to the user's content, intended style and target format; fit lists recommended platform IDs for browser designs. Respect an explicitly requested template. Choose a basic style ID from templates for create_poster_memo.template; browserDesignTemplates IDs are only for request_poster_render.templateId, even when IDs overlap. For a new poster, you may apply a matching browser design during initial rendering: create the poster, read get_poster for expectedRevision, then request_poster_render with templateId. This requires an online desktop/Web workspace; report pending or failed rendering honestly. For an existing poster, apply a different template only when the user explicitly requests a template change. With sections, basic styles share the same grid/list content layout and differ mainly in palette; their headline-only typography descriptions do not determine the section layout.";

@@ -1,13 +1,13 @@
+import type { ImportMemosInput, ImportMemosResponse } from "@edgeever/shared/note-import/types";
+import type { NotebookUpdateInput } from "@edgeever/shared";
 import {
-  isAiCorsFailure,
-  parseAiDirectTarget,
   parsePreparedAiGeneration,
-  probeAiProviderCors,
   streamDirectAiGeneration,
 } from "./ai-direct-stream";
+import type { AiRunRequest } from "./ai-long-generation";
+import { throwIfAborted } from "./abort-signal";
 
 import { createPluginCapabilities } from './plugin-capabilities';
-import { aiDirectTargetKey } from "@edgeever/shared";
 import type {
   CompanionMemory,
   CompanionDiscoverySettings,
@@ -22,6 +22,15 @@ import type {
   ApiToken,
   AuthSession,
   LoginInput,
+  LoginMfaInput,
+  MfaChallenge,
+  TotpBatchConfirmInput,
+  TotpConfirmResponse,
+  TotpReauthInput,
+  TotpRecoveryCodesResponse,
+  TotpSetupResponse,
+  TotpSetupVerifyInput,
+  TotpStatus,
   LoginDeviceSession,
   InstanceUser,
   CreatedApiToken,
@@ -36,6 +45,12 @@ import type {
   MemoShare,
   NotebookShare,
   PublicNotebookShare,
+  NotebookSiteUpdate,
+  NotebookSiteSearchResult,
+  NotebookSiteExclusions,
+  NotebookSiteContents,
+  MemoNotebookSite,
+  NotebookSiteMemoPreview,
   ManagedMemoShare,
   PublicTableForm,
   TableFormSettings,
@@ -57,18 +72,19 @@ import type {
   TiptapDoc,
   AiSettings,
   AiTranscriptionSettings,
-  AiDiscoveredModel,
   AiProvider,
   AiTranscriptionStandard,
   AiPromptTemplate,
   AiPromptTemplateCreateInput,
+  AiModelConfigUpdateInput,
+  AiModelCapabilities,
+  AiModelCapabilityLimits,
   AiPromptTemplateUpdateInput,
   AiStreamEvent,
   AiGenerateInput,
   InfographicAgentEvent,
   InfographicAgentRequest,
   AiTagSuggestionsRequestInput,
-  AiTagSuggestionsResponse,
   SyncBootstrapResponse,
   SyncChange,
   SyncChangesResponse,
@@ -80,27 +96,6 @@ import type {
 
 export const MAX_SINGLE_REQUEST_UPLOAD_BYTES = 5 * 1024 * 1024;
 
-async function consumeEventStream<T>(body: ReadableStream<Uint8Array>, onEvent: (event: T) => void) {
-  const reader = body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  const emit = (frame: string) => {
-    const data = frame.split("\n").find(line => line.startsWith("data: "))?.slice(6);
-    if (data) onEvent(JSON.parse(data) as T);
-  };
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      buffer += decoder.decode(value, { stream: !done });
-      const frames = buffer.split("\n\n");
-      buffer = frames.pop() ?? "";
-      for (const frame of frames) emit(frame);
-      if (done) break;
-    }
-    if (buffer) emit(buffer);
-  } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
-}
-
 export type EdgeEverClientRequestContext = {
   path: string;
   token?: string;
@@ -110,15 +105,19 @@ export type EdgeEverClientOptions = {
   baseUrl?: string | (() => string);
   token?: string | null | (() => string | null | undefined);
   fetch?: typeof fetch;
-  /** Native/desktop note AI and Agent calls the model API directly after a short prepare hop. */
+  /** @deprecated All AI generation now uses client-direct transport. */
   directAiGeneration?: boolean;
-  /**
-   * Browser-only: probe whether the model host allows CORS, then direct-connect.
-   * Falls back to the instance proxy without using a prepared API key when CORS is blocked.
-   */
+  /** @deprecated Use allowAiServerFallback for browser transports. */
   tryDirectAiGeneration?: boolean;
+  /** Web only: retry initial network/CORS failures through the instance. */
+  allowAiServerFallback?: boolean;
   /** Used only for the model provider request; defaults to `fetch`. */
   providerFetch?: typeof fetch;
+  /**
+   * Reads the public models.dev catalogue when a model service reports no limits (#652);
+   * defaults to the global `fetch`, and `null` turns the fallback off.
+   */
+  modelCatalogFetch?: typeof fetch | null;
   beforeRequest?: (context: EdgeEverClientRequestContext) => void | Promise<void>;
   shouldAttachToken?: (path: string) => boolean;
   onUnauthorized?: (context: EdgeEverClientRequestContext) => void | Promise<void>;
@@ -129,6 +128,9 @@ export type MultipartResourceUploadSource = {
   mimeType: string;
   byteSize: number;
   readPart: (start: number, end: number) => Promise<Blob | Uint8Array<ArrayBuffer>>;
+  /** Importers use this to distinguish an uncertain commit from a failed part. */
+  onBeforeComplete?: () => void | Promise<void>;
+  onPartUploaded?: (byteSize: number) => void;
 };
 
 export type InstanceHealth = {
@@ -140,6 +142,10 @@ export type InstanceHealth = {
   build?: string | null;
   deployment?: DeploymentMetadata | null;
   deploymentVersionCreatedAt?: string | null;
+  /** Self-hosted images only: when the container image was built. */
+  buildCreatedAt?: string | null;
+  /** Self-hosted images only: how the container image was built, not how it was deployed. */
+  buildProvenance?: DeploymentMetadata | null;
   migration?: string | null;
   storage?: {
     database?: "d1" | "sqlite" | string | null;
@@ -154,7 +160,7 @@ export type InstanceRelease = {
 };
 
 export type MemoFilterMode = "all" | "tagged" | "untagged" | "pinned";
-export type MemoSortMode = "updated-desc" | "created-desc" | "title-asc";
+export type MemoSortMode = "updated-desc" | "created-desc" | "title-asc" | "title-desc";
 
 export type ListNotebooksResponse = {
   notebooks: Notebook[];
@@ -162,7 +168,7 @@ export type ListNotebooksResponse = {
 
 export type ListMemosResponse = {
   memos: MemoSummary[];
-  totalCount: number;
+  totalCount?: number;
   nextCursor: string | null;
 };
 
@@ -292,8 +298,9 @@ export type ResourceUploadResponse = {
 export type MarkdownExportPage = {
   memos: MemoDetail[];
   resources: Resource[];
-  totalCount: number;
+  totalCount?: number;
   nextOffset: number | null;
+  nextCursor?: string | null;
 };
 
 export type JsonBackupPage = MarkdownExportPage & {
@@ -365,6 +372,22 @@ export class ApiRequestError extends Error {
   }
 }
 
+/** The second-step challenge carried by a 401 `mfa_required` login error. */
+export const getMfaChallenge = (error: unknown): MfaChallenge | null => {
+  if (!(error instanceof ApiRequestError) || error.status !== 401 || error.code !== "mfa_required") return null;
+  const details = error.details as Partial<MfaChallenge> | undefined;
+  if (!details || typeof details.challengeToken !== "string" || !details.challengeToken) return null;
+  return {
+    challengeToken: details.challengeToken,
+    expiresAt: typeof details.expiresAt === "string" ? details.expiresAt : "",
+    methods: Array.isArray(details.methods) ? details.methods : ["totp", "recovery_code"],
+  };
+};
+
+/** A recovery-code session hit a business route before rebinding TOTP. */
+export const isMfaRebindRequiredError = (error: unknown) =>
+  error instanceof ApiRequestError && error.status === 403 && error.code === "mfa_rebind_required";
+
 export type ApiResponseDiagnostics = {
   cloudflareMitigated: boolean;
   isEdgeEverApiError: boolean;
@@ -375,8 +398,27 @@ export type { SyncBootstrapResponse, SyncChangesResponse };
 
 export const createEdgeEverClient = (options: EdgeEverClientOptions = {}) => {
   const getFetch = () => options.fetch ?? globalThis.fetch;
-  const corsCapability = new Map<string, boolean>();
-  const providerFetch = () => options.providerFetch ?? getFetch();
+  // models.dev allows any origin, so it is read directly, never through the model relay (#652).
+  const modelCatalogFetch = () => options.modelCatalogFetch === null ? undefined : options.modelCatalogFetch ?? globalThis.fetch;
+  const providerFetch = (): typeof fetch => async (url, init) => {
+    const directFetch = options.providerFetch ?? getFetch();
+    if (!options.allowAiServerFallback) return directFetch(url, { ...init, credentials: "omit", redirect: "error" });
+    const { fetchAiWithServerFallback } = await import("./ai-provider-relay");
+    return fetchAiWithServerFallback(url, init, directFetch, async target => {
+      const { response } = await send("/api/v1/ai/provider-relay", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/octet-stream",
+          "x-edgeever-ai-target": target.url,
+          "x-edgeever-ai-method": target.method,
+          "x-edgeever-ai-headers": JSON.stringify(Object.fromEntries(target.headers)),
+        },
+        body: target.method === "GET" ? undefined : await target.arrayBuffer(),
+        signal: target.signal,
+      });
+      return response;
+    });
+  };
   const getBaseUrl = () => normalizeBaseUrl(
     typeof options.baseUrl === "function" ? options.baseUrl() : options.baseUrl,
   );
@@ -529,6 +571,7 @@ export const createEdgeEverClient = (options: EdgeEverClientOptions = {}) => {
                 body: chunk,
               },
             );
+            source.onPartUploaded?.(Math.min(partNumber * upload.partSize, source.byteSize));
             break;
           } catch (error) {
             attempt += 1;
@@ -541,6 +584,7 @@ export const createEdgeEverClient = (options: EdgeEverClientOptions = {}) => {
           }
         }
       }
+      await source.onBeforeComplete?.();
       return await request<ResourceResponse>(
         `/api/v1/resource-uploads/${encodeURIComponent(upload.id)}/complete`,
         { method: "POST", body: JSON.stringify({}) },
@@ -661,13 +705,6 @@ export const createEdgeEverClient = (options: EdgeEverClientOptions = {}) => {
     return createResourceMultipartSink(upload);
   };
 
-  const consumeCompanionStream = async (path: string, body: string, signal: AbortSignal | undefined, onEvent: (event: CompanionEvent) => void) => {
-    const { context, response } = await send(path, { method: "POST", body, signal });
-    if (!response.ok) await throwRequestError(context, response);
-    if (!response.body) throw new ApiRequestError("Stream unavailable", 502, "companion_failed");
-    await consumeEventStream(response.body, onEvent);
-  };
-
   const runPreparedCompanion = async (
     prepared: import("@edgeever/shared").CompanionPreparedTurn,
     streamOptions: { signal?: AbortSignal; onEvent: (event: CompanionEvent) => void },
@@ -693,125 +730,52 @@ export const createEdgeEverClient = (options: EdgeEverClientOptions = {}) => {
     });
   };
 
+  const directAiUnavailable = () => new ApiRequestError(
+    "This instance does not support direct AI preparation. Update the instance before using AI.",
+    409,
+    "ai_direct_unavailable",
+  );
+
   const runCompanionDirect = async (
     preparePath: string,
     payload: unknown,
     streamOptions: { signal?: AbortSignal; onEvent: (event: CompanionEvent) => void },
-    proxy: () => Promise<void>,
-    proxyExisting: (turnId: string) => Promise<void>,
   ) => {
-    const prepare = async () => {
-      const { context, response } = await send(preparePath, {
-        method: "POST", body: JSON.stringify(payload), signal: streamOptions.signal,
-      });
-      if (response.ok) {
-        const { parsePreparedCompanion } = await import("./companion-direct-stream");
-        const prepared = parsePreparedCompanion(await response.json());
-        if (!prepared) throw new ApiRequestError("The companion prepare response is invalid", 502, "companion_failed");
-        return prepared;
-      }
-      if (response.status !== 404) await throwRequestError(context, response);
-      return null;
-    };
-
-    if (options.directAiGeneration) {
-      const prepared = await prepare();
-      if (prepared) {
-        await runPreparedCompanion(prepared, streamOptions);
-        return;
-      }
-      await proxy();
-      return;
-    }
-
-    if (options.tryDirectAiGeneration) {
-      const { context, response } = await send("/api/v1/ai/direct-target", { signal: streamOptions.signal });
-      if (response.ok) {
-        const target = parseAiDirectTarget(await response.json());
-        const cacheKey = target ? aiDirectTargetKey(target) : "";
-        let allowed = cacheKey ? corsCapability.get(cacheKey) : false;
-        if (target && allowed === undefined) {
-          allowed = await probeAiProviderCors(target, providerFetch(), streamOptions.signal);
-          corsCapability.set(cacheKey, allowed);
-        }
-        if (target && allowed) {
-          try {
-            const prepared = await prepare();
-            if (prepared) {
-              try {
-                await runPreparedCompanion(prepared, streamOptions);
-                return;
-              } catch (error) {
-                if (!isAiCorsFailure(error)) throw error;
-                corsCapability.set(cacheKey, false);
-                await proxyExisting(prepared.turn.id);
-                return;
-              }
-            }
-          } catch (error) {
-            if (!isAiCorsFailure(error)) throw error;
-            if (cacheKey) corsCapability.set(cacheKey, false);
-          }
-        }
-      } else if (response.status !== 404 && response.status !== 409) {
-        await throwRequestError(context, response);
-      }
-    }
-
-    await proxy();
+    throwIfAborted(streamOptions.signal);
+    const { context, response } = await send(preparePath, {
+      method: "POST", body: JSON.stringify(payload), signal: streamOptions.signal,
+    });
+    if (response.status === 404 || response.status === 410) throw directAiUnavailable();
+    if (!response.ok) await throwRequestError(context, response);
+    const { parsePreparedCompanion } = await import("./companion-direct-stream");
+    const prepared = parsePreparedCompanion(await response.json());
+    if (!prepared) throw new ApiRequestError("The companion prepare response is invalid", 502, "companion_failed");
+    await runPreparedCompanion(prepared, streamOptions);
   };
 
-  const runDirectOrProxy = async <T, P>(args: {
+  const runDirectAi = async <T, P>(args: {
     signal?: AbortSignal;
     prepare: () => Promise<P | null>;
     run: (prepared: P) => Promise<T>;
-    proxy: () => Promise<T>;
-    recover?: (prepared: P) => Promise<T>;
   }): Promise<T> => {
-    const attemptPrepare = async () => {
-      if (options.directAiGeneration) return args.prepare();
-      if (!options.tryDirectAiGeneration) return null;
-      const { context, response } = await send("/api/v1/ai/direct-target", { signal: args.signal });
-      if (!response.ok) {
-        if (response.status !== 404 && response.status !== 409) await throwRequestError(context, response);
-        return null;
-      }
-      const target = parseAiDirectTarget(await response.json());
-      const cacheKey = target ? aiDirectTargetKey(target) : "";
-      let allowed = cacheKey ? corsCapability.get(cacheKey) : false;
-      if (target && allowed === undefined) {
-        allowed = await probeAiProviderCors(target, providerFetch(), args.signal);
-        corsCapability.set(cacheKey, allowed);
-      }
-      if (!target || !allowed) return null;
-      try {
-        return await args.prepare();
-      } catch (error) {
-        if (!isAiCorsFailure(error)) throw error;
-        if (cacheKey) corsCapability.set(cacheKey, false);
-        return null;
-      }
-    };
-    const prepared = await attemptPrepare();
-    if (prepared == null) return args.proxy();
-    try {
-      return await args.run(prepared);
-    } catch (error) {
-      if (!isAiCorsFailure(error)) throw error;
-      return args.recover ? args.recover(prepared) : args.proxy();
-    }
+    throwIfAborted(args.signal);
+    const prepared = await args.prepare();
+    if (prepared == null) throw directAiUnavailable();
+    throwIfAborted(args.signal);
+    return args.run(prepared);
   };
 
   const pluginCapabilities = createPluginCapabilities(request, requestPluginPublic);
 
   return {
+    fetchAiProvider: providerFetch(),
     getInstanceHealth: () => request<InstanceHealth>("/api/health"),
     ...pluginCapabilities,
     pluginAi: {
       status: pluginCapabilities.pluginAi.status,
       generate: async (input: PluginAiGenerateRequest & { signal?: AbortSignal }) => {
         const { signal, ...payload } = input;
-        return runDirectOrProxy({
+        return runDirectAi({
           signal,
           prepare: async () => {
             const { context, response } = await send("/api/v1/plugins/ai/generate/prepare", {
@@ -830,7 +794,6 @@ export const createEdgeEverClient = (options: EdgeEverClientOptions = {}) => {
             const { generateDirectAiText } = await import("./ai-direct-generate");
             return { text: await generateDirectAiText(prepared, { fetch: providerFetch(), signal }) };
           },
-          proxy: () => pluginCapabilities.pluginAi.generate(input),
         });
       },
     },
@@ -841,6 +804,27 @@ export const createEdgeEverClient = (options: EdgeEverClientOptions = {}) => {
 
     getPublicNotebookShare: (token: string) =>
       request<{ share: PublicNotebookShare }>(`/api/public/notebook-shares/${encodeURIComponent(token)}`),
+    resolveNotebookSite: (slug: string) => request<{ token: string }>(`/api/public/notebook-sites/${encodeURIComponent(slug)}/resolve`),
+    searchPublicNotebook: (token: string, input: { q?: string; tag?: string; cursor?: string | null }) => {
+      const params = new URLSearchParams();
+      if (input.q) params.set("q", input.q);
+      if (input.tag) params.set("tag", input.tag);
+      if (input.cursor) params.set("cursor", input.cursor);
+      return request<NotebookSiteSearchResult>(`/api/public/notebook-shares/${encodeURIComponent(token)}/search?${params}`);
+    },
+    previewPublicNotebookMemo: (token: string, memoId: string) => request<{ memo: NotebookSiteMemoPreview }>(`/api/public/notebook-shares/${encodeURIComponent(token)}/memos/${encodeURIComponent(memoId)}/preview`),
+    updateNotebookSite: (id: string, input: NotebookSiteUpdate) => request<{ share: NotebookShare }>(`/api/v1/notebooks/${encodeURIComponent(id)}/share/site`, { method: "PATCH", body: JSON.stringify(input) }),
+    getMemoNotebookSites: (memoId: string) => request<{ sites: MemoNotebookSite[] }>(`/api/v1/memos/${encodeURIComponent(memoId)}/notebook-sites`),
+    listNotebookSiteMemos: (id: string, input: { q?: string; visibility?: "all" | "public" | "excluded"; cursor?: string | null; limit?: number }) => {
+      const params = new URLSearchParams();
+      if (input.q) params.set("q", input.q);
+      if (input.visibility) params.set("visibility", input.visibility);
+      if (input.cursor) params.set("cursor", input.cursor);
+      if (input.limit !== undefined) params.set("limit", String(input.limit));
+      return request<NotebookSiteContents>(`/api/v1/notebooks/${encodeURIComponent(id)}/share/memos?${params}`);
+    },
+    listNotebookSiteExclusions: (id: string, cursor?: string | null) => request<NotebookSiteExclusions>(`/api/v1/notebooks/${encodeURIComponent(id)}/share/excluded-memos${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`),
+    setNotebookSiteExclusion: (id: string, memoId: string, excluded: boolean) => request<{ memoId: string; excluded: boolean }>(`/api/v1/notebooks/${encodeURIComponent(id)}/share/memos/${encodeURIComponent(memoId)}`, { method: "PATCH", body: JSON.stringify({ excluded }) }),
     getPublicNotebookMemo: (token: string, memoId: string) =>
       request<{ share: PublicMemoShare; memoUrls: Record<string, string> }>(`/api/public/notebook-shares/${encodeURIComponent(token)}/memos/${encodeURIComponent(memoId)}`),
     unlockPublicNotebookShare: (token: string, password: string) =>
@@ -879,10 +863,10 @@ export const createEdgeEverClient = (options: EdgeEverClientOptions = {}) => {
       request<ListLoginDeviceSessionsResponse>("/api/v1/auth/sessions"),
 
     revokeLoginDeviceSession: (sessionId: string) =>
-      request<{ ok: true }>(`/api/v1/auth/sessions/${sessionId}`, { method: "DELETE" }),
+      request<{ ok: true }>(`/api/v1/auth/sessions/${encodeURIComponent(sessionId)}`, { method: "DELETE" }),
 
     updateLoginDeviceSession: (sessionId: string, payload: { label: string | null }) =>
-      request<{ ok: true }>(`/api/v1/auth/sessions/${sessionId}`, {
+      request<{ ok: true }>(`/api/v1/auth/sessions/${encodeURIComponent(sessionId)}`, {
         method: "PATCH",
         body: JSON.stringify(payload),
       }),
@@ -892,6 +876,55 @@ export const createEdgeEverClient = (options: EdgeEverClientOptions = {}) => {
 
     login: (payload: LoginInput) =>
       request<AuthSession>("/api/v1/auth/login", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }),
+
+    /** Second login step after `login` rejected with `getMfaChallenge(error)`. */
+    completeMfaLogin: (payload: LoginMfaInput) =>
+      request<AuthSession>("/api/v1/auth/login/mfa", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }),
+
+    getTotpStatus: () => request<TotpStatus>("/api/v1/auth/totp"),
+
+    /** Starts enabling (password) or rebinding (password + code; none when restricted). */
+    startTotpSetup: (payload: TotpReauthInput) =>
+      request<TotpSetupResponse>("/api/v1/auth/totp/setup", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }),
+
+    /** Step 2: the code for the setup this client was shown (`setupId` from `startTotpSetup`). */
+    verifyTotpSetup: (payload: TotpSetupVerifyInput) =>
+      request<TotpRecoveryCodesResponse>("/api/v1/auth/totp/setup/verify", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }),
+
+    /** Last step: activates exactly the batch the user saved (`batchId` from `verifyTotpSetup`). */
+    confirmTotpSetup: (payload: TotpBatchConfirmInput) =>
+      request<TotpConfirmResponse>("/api/v1/auth/totp/setup/confirm", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }),
+
+    regenerateRecoveryCodes: (payload: TotpReauthInput) =>
+      request<TotpRecoveryCodesResponse>("/api/v1/auth/totp/recovery-codes", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }),
+
+    /** Activates exactly the batch from `regenerateRecoveryCodes`; a replaced batch answers 409. */
+    confirmRecoveryCodes: (payload: TotpBatchConfirmInput) =>
+      request<{ ok: true }>("/api/v1/auth/totp/recovery-codes/confirm", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }),
+
+    disableTotp: (payload: TotpReauthInput) =>
+      request<{ ok: true }>("/api/v1/auth/totp/disable", {
         method: "POST",
         body: JSON.stringify(payload),
       }),
@@ -1007,26 +1040,28 @@ export const createEdgeEverClient = (options: EdgeEverClientOptions = {}) => {
         method: "DELETE",
       }),
 
-    testAiProvider: (providerConfigId: string, payload: {
-      modelId: string;
-      provider?: AiProvider;
-      baseUrl?: string;
-      apiKey?: string;
-    }) =>
-      request<{ ok: true; response: string }>(`/api/v1/ai/providers/${encodeURIComponent(providerConfigId)}/test`, {
-        method: "POST",
-        body: JSON.stringify(payload),
-      }),
-
-    discoverAiProviderModels: (providerConfigId: string) =>
-      request<{ models: AiDiscoveredModel[] }>(`/api/v1/ai/providers/${encodeURIComponent(providerConfigId)}/discover-models`, {
-        method: "POST",
-        body: JSON.stringify({}),
-      }),
+    testAiProvider: async (providerConfigId: string, payload: { modelId: string; provider?: AiProvider; baseUrl?: string; apiKey?: string }) => {
+      const prepared = await request<import("@edgeever/shared").AiPreparedTextGeneration>(`/api/v1/ai/providers/${encodeURIComponent(providerConfigId)}/direct-credential`, { method: "POST", body: JSON.stringify(payload) });
+      const { generateDirectAiText } = await import("./ai-direct-generate");
+      const text = await generateDirectAiText({ ...prepared, system: "Follow the user instruction exactly.", prompt: "Reply with only: OK", maxOutputTokens: 16 }, { fetch: providerFetch(), signal: AbortSignal.timeout(20_000) });
+      return { ok: true, response: text.trim() };
+    },
+    discoverAiProviderModels: async (providerConfigId: string) => {
+      const prepared = await request<{ provider: AiProvider; baseUrl: string; apiKey: string }>(`/api/v1/ai/providers/${encodeURIComponent(providerConfigId)}/direct-credential`, { method: "POST", body: "{}" });
+      const { discoverAiModels } = await import("./ai-provider-direct");
+      return { models: await discoverAiModels(prepared, providerFetch()) };
+    },
 
     addAiModel: (providerConfigId: string, payload: { modelId: string; displayName?: string }) =>
       request<AiSettings>(`/api/v1/ai/providers/${encodeURIComponent(providerConfigId)}/models`, {
         method: "POST",
+        body: JSON.stringify(payload),
+      }),
+
+    /** Omitted fields keep their value; `null` restores the default budget. */
+    updateAiModel: (providerConfigId: string, modelConfigId: string, payload: AiModelConfigUpdateInput) =>
+      request<AiSettings>(`/api/v1/ai/providers/${encodeURIComponent(providerConfigId)}/models/${encodeURIComponent(modelConfigId)}`, {
+        method: "PATCH",
         body: JSON.stringify(payload),
       }),
 
@@ -1075,7 +1110,7 @@ export const createEdgeEverClient = (options: EdgeEverClientOptions = {}) => {
     },
 
     suggestAiTags: (payload: AiTagSuggestionsRequestInput, signal?: AbortSignal) =>
-      runDirectOrProxy({
+      runDirectAi({
         signal,
         prepare: async () => {
           const { context, response } = await send("/api/v1/ai/tag-suggestions/prepare", {
@@ -1095,9 +1130,6 @@ export const createEdgeEverClient = (options: EdgeEverClientOptions = {}) => {
           const text = await generateDirectAiText(prepared, { fetch: providerFetch(), signal });
           return { suggestions: suggestionsFromDirectText(text, prepared) };
         },
-        proxy: () => request<AiTagSuggestionsResponse>("/api/v1/ai/tag-suggestions", {
-          method: "POST", body: JSON.stringify(payload), signal,
-        }),
       }),
 
     listCompanionMemories: () => request<{ memories: CompanionMemory[] }>("/api/v1/companion/memories"),
@@ -1105,7 +1137,7 @@ export const createEdgeEverClient = (options: EdgeEverClientOptions = {}) => {
     saveCompanionDiscoverySettings: (input: CompanionDiscoverySettingsInput) => request<{ settings: CompanionDiscoverySettings }>("/api/v1/companion/discovery/settings", { method: "PUT", body: JSON.stringify(input) }),
     listCompanionDiscoveries: () => request<{ items: CompanionDiscoveryItem[] }>("/api/v1/companion/discovery"),
     checkCompanionDiscoveries: (locale: string, signal?: AbortSignal) =>
-      runDirectOrProxy({
+      runDirectAi({
         signal,
         prepare: async () => {
           const { context, response } = await send(
@@ -1129,15 +1161,6 @@ export const createEdgeEverClient = (options: EdgeEverClientOptions = {}) => {
             method: "POST", body: JSON.stringify({ turnId: prepared.turnId, output }), signal,
           });
         },
-        proxy: () => request<{ items: CompanionDiscoveryItem[] }>(
-          `/api/v1/companion/discovery/check?locale=${encodeURIComponent(locale)}`,
-          { method: "POST", body: "{}", signal },
-        ),
-        recover: (prepared) => prepared.quiet
-          ? Promise.resolve({ items: prepared.items })
-          : request<{ items: CompanionDiscoveryItem[] }>("/api/v1/companion/discovery/check/proxy", {
-            method: "POST", body: JSON.stringify({ turnId: prepared.turnId }), signal,
-          }),
       }),
     acknowledgeCompanionDiscovery: (id: string, dismiss = false) => request<{ ok: true }>(`/api/v1/companion/discovery/${encodeURIComponent(id)}/${dismiss ? "dismiss" : "seen"}`, { method: "POST", body: "{}" }),
     rememberCompanionDiscoveryFeedback: (id: string) => request<{ ok: true }>(`/api/v1/companion/discovery/${encodeURIComponent(id)}/feedback`, { method: "POST", body: "{}" }),
@@ -1155,23 +1178,7 @@ export const createEdgeEverClient = (options: EdgeEverClientOptions = {}) => {
     getCompanionTurn: (id: string) => request<{ turn: CompanionTurn }>(`/api/v1/companion/turns/${encodeURIComponent(id)}`),
     cancelCompanionTurn: (id: string) => request<{ ok: true }>(`/api/v1/companion/turns/${encodeURIComponent(id)}/cancel`, { method: "POST", body: "{}" }),
     resumeCompanionTurn: async (id: string, payload: CompanionTurnResume = {}, options: { signal?: AbortSignal; onEvent: (event: CompanionEvent) => void }) => {
-      await runCompanionDirect(
-        `/api/v1/companion/turns/${encodeURIComponent(id)}/resume/prepare`,
-        payload,
-        options,
-        () => consumeCompanionStream(
-          `/api/v1/companion/turns/${encodeURIComponent(id)}/resume`,
-          JSON.stringify(payload),
-          options.signal,
-          options.onEvent,
-        ),
-        () => consumeCompanionStream(
-          `/api/v1/companion/turns/${encodeURIComponent(id)}/proxy`,
-          "{}",
-          options.signal,
-          options.onEvent,
-        ),
-      );
+      await runCompanionDirect(`/api/v1/companion/turns/${encodeURIComponent(id)}/resume/prepare`, payload, options);
     },
     clearCompanionHistory: () => request<{ ok: true }>("/api/v1/companion/history", { method: "DELETE" }),
     uploadCompanionAttachment: (attachment: { filename: string; mediaType: string; base64Data: string }) =>
@@ -1183,107 +1190,94 @@ export const createEdgeEverClient = (options: EdgeEverClientOptions = {}) => {
     importCompanionMemories: (memories: { content: string; kind?: "explicit" | "inferred" }[], controls?: { useMemory: boolean; learningEnabled: boolean }) => request<{ memories: CompanionMemory[] }>("/api/v1/companion/import-memories", {
       method: "POST", body: JSON.stringify({ version: 2, memories, controls }),
     }),
-    streamCompanion: async (payload: CompanionTurnInput, options: { signal?: AbortSignal; onEvent: (event: CompanionEvent) => void }) => {
-      await runCompanionDirect(
-        "/api/v1/companion/turns/prepare",
-        payload,
-        options,
-        () => consumeCompanionStream("/api/v1/companion/turns", JSON.stringify(payload), options.signal, options.onEvent),
-        (turnId) => consumeCompanionStream(
-          `/api/v1/companion/turns/${encodeURIComponent(turnId)}/proxy`,
-          "{}",
-          options.signal,
-          options.onEvent,
-        ),
-      );
+    streamCompanion: async (payload: CompanionTurnInput, streamOptions: { signal?: AbortSignal; onEvent: (event: CompanionEvent) => void }) => {
+      await runCompanionDirect("/api/v1/companion/turns/prepare", payload, streamOptions);
     },
 
-    streamInfographicAgent: async (
-      payload: InfographicAgentRequest,
-      streamOptions: { signal?: AbortSignal; onEvent: (event: InfographicAgentEvent) => void },
-    ) => {
-      const { context, response } = await send("/api/v1/ai/infographic-agent", {
-        method: "POST",
-        body: JSON.stringify(payload),
-        signal: streamOptions.signal,
+    streamInfographicAgent: async (payload: InfographicAgentRequest, streamOptions: { signal?: AbortSignal; onEvent: (event: InfographicAgentEvent) => void }) => {
+      const prepared = await request<import("@edgeever/shared").AiPreparedTextGeneration>("/api/v1/ai/infographic-agent/prepare", {
+        method: "POST", body: JSON.stringify(payload), signal: streamOptions.signal,
       });
-      if (!response.ok) await throwRequestError(context, response);
-      if (!response.body) throw new ApiRequestError("Streaming response is unavailable", 502, "ai_stream_unavailable");
-      await consumeEventStream(response.body, streamOptions.onEvent);
+      const { runInfographicAgent } = await import("./infographic-direct");
+      const { createClientAiModel } = await import("./ai-model");
+      await runInfographicAgent({ input: payload, model: createClientAiModel({ ...prepared, fetch: providerFetch() }),
+        signal: streamOptions.signal ?? new AbortController().signal, onEvent: streamOptions.onEvent });
     },
 
-    streamAiGeneration: async (
-      payload: AiGenerateInput,
-      streamOptions: { signal?: AbortSignal; onEvent: (event: AiStreamEvent) => void },
-    ) => {
-      const proxyGenerate = async () => {
-        const path = "/api/v1/ai/generate";
-        const { context, response } = await send(path, {
-          method: "POST",
-          body: JSON.stringify(payload),
-          signal: streamOptions.signal,
-        });
-        if (!response.ok) {
-          await throwRequestError(context, response);
-        }
-        if (!response.body) throw new ApiRequestError("Streaming response is unavailable", 502, "ai_stream_unavailable");
-        await consumeEventStream(response.body, streamOptions.onEvent);
-      };
-
-      const prepareAndDirect = async () => {
+    streamAiGeneration: async (payload: AiGenerateInput, streamOptions: { signal?: AbortSignal; onEvent: (event: AiStreamEvent) => void }) => {
+      throwIfAborted(streamOptions.signal);
+      const prepare = async (run: AiRunRequest = { segmentation: {} }) => {
         const { context, response } = await send("/api/v1/ai/generate/prepare", {
-          method: "POST",
-          body: JSON.stringify(payload),
-          signal: streamOptions.signal,
+          // This client can send a request without an output limit when none is known, and can run
+          // a long task in parts or continue a cut-off result (#652).
+          method: "POST", body: JSON.stringify({ ...payload, ...run, allowUnboundedOutput: true }), signal: streamOptions.signal,
         });
-        if (response.ok) {
-          const prepared = parsePreparedAiGeneration(await response.json());
-          if (!prepared) {
-            throw new ApiRequestError("The AI prepare response is invalid", 502, "ai_generation_failed");
-          }
-          await streamDirectAiGeneration(prepared, payload.attachments, {
-            fetch: providerFetch(),
-            signal: streamOptions.signal,
-            onEvent: streamOptions.onEvent,
-          });
-          return true;
-        }
-        if (response.status !== 404) await throwRequestError(context, response);
-        return false;
+        if (response.status === 404 || response.status === 410) throw directAiUnavailable();
+        if (!response.ok) await throwRequestError(context, response);
+        const parsed = parsePreparedAiGeneration(await response.json());
+        if (!parsed) throw new ApiRequestError("The AI prepare response is invalid", 502, "ai_generation_failed");
+        return parsed;
       };
-
-      if (options.directAiGeneration) {
-        if (await prepareAndDirect()) return;
-        await proxyGenerate();
-        return;
+      let prepared = await prepare();
+      // Reporting and detecting are separate: a fresh cache is not read again, but a limit learned
+      // from a provider error is still reported so a cached value that is too high gets corrected.
+      const target = prepared.capabilityTarget;
+      const report = (limits: AiModelCapabilityLimits) => target
+        ? request(`/api/v1/ai/providers/${encodeURIComponent(target.providerConfigId)}/models/${encodeURIComponent(target.modelConfigId)}/capabilities`, {
+          method: "PUT",
+          body: JSON.stringify({
+            provider: prepared.provider,
+            modelId: prepared.modelId,
+            baseUrl: prepared.baseUrl,
+            configVersion: target.configVersion,
+            ...limits,
+          }),
+        }).then(() => true, () => false)
+        : Promise.resolve(false);
+      if (target && prepared.detectCapabilities) {
+        // The instance has no fresh limits for this model: read them from the provider once,
+        // save them for every client, and prepare again so this request already uses them.
+        const { detectAiModelCapabilities } = await import("./ai-model-capabilities-direct");
+        const limits = await detectAiModelCapabilities(prepared, providerFetch(), streamOptions.signal, { catalogFetch: modelCatalogFetch() });
+        const hasLimits = Boolean(limits && (limits.maxOutputTokens || limits.maxInputTokens || limits.contextWindowTokens));
+        if (limits && await report(limits) && hasLimits) prepared = await prepare();
       }
-
-      if (options.tryDirectAiGeneration) {
-        const { context, response } = await send("/api/v1/ai/direct-target", {
+      const { runAiLongGeneration } = await import("./ai-long-generation");
+      await runAiLongGeneration({
+        first: prepared,
+        prepare,
+        signal: streamOptions.signal,
+        onEvent: streamOptions.onEvent,
+        stream: (next, onEvent) => streamDirectAiGeneration(next, payload.attachments, {
+          fetch: providerFetch(),
           signal: streamOptions.signal,
-        });
-        if (response.ok) {
-          const target = parseAiDirectTarget(await response.json());
-          const cacheKey = target ? aiDirectTargetKey(target) : "";
-          let allowed = cacheKey ? corsCapability.get(cacheKey) : false;
-          if (target && allowed === undefined) {
-            allowed = await probeAiProviderCors(target, providerFetch(), streamOptions.signal);
-            corsCapability.set(cacheKey, allowed);
-          }
-          if (target && allowed) {
-            try {
-              if (await prepareAndDirect()) return;
-            } catch (error) {
-              if (!isAiCorsFailure(error)) throw error;
-              corsCapability.set(cacheKey, false);
-            }
-          }
-        } else if (response.status !== 404 && response.status !== 409) {
-          await throwRequestError(context, response);
-        }
-      }
+          // The run reports one start for all of its requests.
+          onEvent: (event) => { if (event.type !== "start") onEvent(event); },
+          onOutputLimit: async (maxOutputTokens) => {
+            if (!target) return;
+            await report({ maxOutputTokens, maxInputTokens: null, contextWindowTokens: null, source: "provider-error" });
+          },
+        }),
+      });
+    },
 
-      await proxyGenerate();
+    /** Read a saved model's limits from its provider and store them on the instance (#652). */
+    detectAiModelCapabilities: async (providerConfigId: string, modelConfigId: string, modelId: string, signal?: AbortSignal) => {
+      const credential = await request<{ provider: AiProvider; baseUrl: string; apiKey: string; configVersion: string }>(
+        `/api/v1/ai/providers/${encodeURIComponent(providerConfigId)}/direct-credential`,
+        { method: "POST", body: JSON.stringify({ modelId }), signal },
+      );
+      const { detectAiModelCapabilities } = await import("./ai-model-capabilities-direct");
+      const limits = await detectAiModelCapabilities({ ...credential, modelId }, providerFetch(), signal, { catalogFetch: modelCatalogFetch() });
+      if (!limits) return null;
+      return request<{ detectedCapabilities: AiModelCapabilities | null }>(
+        `/api/v1/ai/providers/${encodeURIComponent(providerConfigId)}/models/${encodeURIComponent(modelConfigId)}/capabilities`,
+        {
+          method: "PUT",
+          body: JSON.stringify({ provider: credential.provider, modelId, baseUrl: credential.baseUrl, configVersion: credential.configVersion, ...limits }),
+          signal,
+        },
+      );
     },
 
     listUsers: () => request<ListUsersResponse>("/api/v1/users"),
@@ -1297,7 +1291,7 @@ export const createEdgeEverClient = (options: EdgeEverClientOptions = {}) => {
       }),
 
     updateUser: (userId: string, payload: { displayName?: string | null; password?: string; isDisabled?: boolean }) =>
-      request<UserResponse>(`/api/v1/users/${userId}`, {
+      request<UserResponse>(`/api/v1/users/${encodeURIComponent(userId)}`, {
         method: "PATCH",
         body: JSON.stringify(payload),
       }),
@@ -1312,7 +1306,10 @@ export const createEdgeEverClient = (options: EdgeEverClientOptions = {}) => {
 
     syncBootstrap: (params?: { afterId?: string | null; limit?: number }) => {
       const search = new URLSearchParams();
-      if (params?.afterId) search.set("afterId", params.afterId);
+      if (params?.afterId) {
+        search.set("afterId", params.afterId);
+        search.set("includeMetadata", "0");
+      }
       if (params?.limit) search.set("limit", String(params.limit));
       const suffix = search.toString() ? `?${search.toString()}` : "";
       return request<SyncBootstrapResponse>(`/api/v1/sync/bootstrap${suffix}`);
@@ -1328,6 +1325,7 @@ export const createEdgeEverClient = (options: EdgeEverClientOptions = {}) => {
       const search = new URLSearchParams({ limit: String(limit) });
       if (afterId) {
         search.set("afterId", afterId);
+        search.set("includeMetadata", "0");
       }
       return request<MobileSyncBootstrapPage>(`/api/v1/sync/bootstrap?${search.toString()}`);
     },
@@ -1341,19 +1339,19 @@ export const createEdgeEverClient = (options: EdgeEverClientOptions = {}) => {
         body: JSON.stringify(payload),
       }),
 
-    updateNotebook: (notebookId: string, payload: { name?: string; parentId?: string | null; sortOrder?: number }) =>
-      request<NotebookResponse>(`/api/v1/notebooks/${notebookId}`, {
+    updateNotebook: (notebookId: string, payload: NotebookUpdateInput) =>
+      request<NotebookResponse>(`/api/v1/notebooks/${encodeURIComponent(notebookId)}`, {
         method: "PATCH",
         body: JSON.stringify(payload),
       }),
 
     deleteNotebook: (notebookId: string) =>
-      request<{ ok: true }>(`/api/v1/notebooks/${notebookId}`, {
+      request<{ ok: true }>(`/api/v1/notebooks/${encodeURIComponent(notebookId)}`, {
         method: "DELETE",
       }),
 
     restoreNotebook: (notebookId: string) =>
-      request<NotebookResponse>(`/api/v1/notebooks/${notebookId}/restore`, {
+      request<NotebookResponse>(`/api/v1/notebooks/${encodeURIComponent(notebookId)}/restore`, {
         method: "POST",
       }),
 
@@ -1379,12 +1377,13 @@ export const createEdgeEverClient = (options: EdgeEverClientOptions = {}) => {
       }),
 
     revokeApiToken: (tokenId: string) =>
-      request<{ ok: true }>(`/api/v1/api-tokens/${tokenId}`, {
+      request<{ ok: true }>(`/api/v1/api-tokens/${encodeURIComponent(tokenId)}`, {
         method: "DELETE",
       }),
 
     listMemos: (params: {
       notebookId?: string | null;
+      includeTotal?: boolean;
       includeDescendants?: boolean;
       q?: string;
       tag?: string;
@@ -1432,8 +1431,13 @@ export const createEdgeEverClient = (options: EdgeEverClientOptions = {}) => {
         search.set("limit", String(params.limit));
       }
 
+      if (params.includeTotal === false) search.set("includeTotal", "0");
       return request<ListMemosResponse>(`/api/v1/memos?${search.toString()}`);
     },
+
+    getImportCapabilities: () => request<{ protocolVersion: number; maxBatchSize: number; formats: string[]; importContext: string; accountId: string | null }>("/api/v1/imports/capabilities"),
+
+    importMemos: (payload: ImportMemosInput) => request<ImportMemosResponse>("/api/v1/imports/memos", { method: "POST", body: JSON.stringify(payload) }),
 
     createMemo: (payload: {
       notebookId: string;
@@ -1469,19 +1473,19 @@ export const createEdgeEverClient = (options: EdgeEverClientOptions = {}) => {
       title?: string | null;
       contentMarkdown?: string;
       tags?: string[];
-    }) => request<TemplateResponse>(`/api/v1/templates/${templateId}`, {
+    }) => request<TemplateResponse>(`/api/v1/templates/${encodeURIComponent(templateId)}`, {
       method: "PATCH",
       body: JSON.stringify(payload),
     }),
 
-    useTemplate: (templateId: string, notebookId: string) =>
-      request<MemoResponse>(`/api/v1/templates/${templateId}/use`, {
+    useTemplate: (templateId: string, notebookId: string, locale?: string) =>
+      request<MemoResponse>(`/api/v1/templates/${encodeURIComponent(templateId)}/use`, {
         method: "POST",
-        body: JSON.stringify({ notebookId }),
+        body: JSON.stringify(locale ? { notebookId, locale } : { notebookId }),
       }),
 
     deleteTemplate: (templateId: string) =>
-      request<{ ok: true }>(`/api/v1/templates/${templateId}`, { method: "DELETE" }),
+      request<{ ok: true }>(`/api/v1/templates/${encodeURIComponent(templateId)}`, { method: "DELETE" }),
 
     listScheduledTasks: (executorDeviceId?: string) => {
       const search = new URLSearchParams();
@@ -1614,23 +1618,23 @@ export const createEdgeEverClient = (options: EdgeEverClientOptions = {}) => {
       }
 
       const suffix = search.toString() ? `?${search.toString()}` : "";
-      return request<MemoResponse>(`/api/v1/memos/${memoId}${suffix}`);
+      return request<MemoResponse>(`/api/v1/memos/${encodeURIComponent(memoId)}${suffix}`);
     },
 
     getMemoShare: (memoId: string) =>
-      request<MemoShareResponse>(`/api/v1/memos/${memoId}/share`),
+      request<MemoShareResponse>(`/api/v1/memos/${encodeURIComponent(memoId)}/share`),
 
     listMemoShares: (offset = 0, limit = 50) =>
       request<ListMemoSharesResponse>(`/api/v1/memo-shares?offset=${offset}&limit=${limit}`),
 
     createMemoShare: (memoId: string) =>
-      request<{ share: MemoShare }>(`/api/v1/memos/${memoId}/share`, {
+      request<{ share: MemoShare }>(`/api/v1/memos/${encodeURIComponent(memoId)}/share`, {
         method: "POST",
         body: JSON.stringify({}),
       }),
 
-    updateMemoShare: (memoId: string, payload: { passwordProtected: boolean }) =>
-      request<{ share: MemoShare }>(`/api/v1/memos/${memoId}/share`, {
+    updateMemoShare: (memoId: string, payload: { passwordProtected?: boolean; password?: string; slug?: string | null; showUpdatedAt?: boolean; showBranding?: boolean; expiresAt?: string | null }) =>
+      request<{ share: MemoShare }>(`/api/v1/memos/${encodeURIComponent(memoId)}/share`, {
         method: "PATCH",
         body: JSON.stringify(payload),
       }),
@@ -1669,18 +1673,18 @@ export const createEdgeEverClient = (options: EdgeEverClientOptions = {}) => {
     },
 
     revokeMemoShare: (memoId: string) =>
-      request<{ ok: true }>(`/api/v1/memos/${memoId}/share`, { method: "DELETE" }),
+      request<{ ok: true }>(`/api/v1/memos/${encodeURIComponent(memoId)}/share`, { method: "DELETE" }),
 
     createMemoEditSession: (memoId: string) =>
-      request<{ editSession: MemoEditSession }>(`/api/v1/memos/${memoId}/edit-sessions`, {
+      request<{ editSession: MemoEditSession }>(`/api/v1/memos/${encodeURIComponent(memoId)}/edit-sessions`, {
         method: "POST",
         body: JSON.stringify({}),
       }),
 
-    listMemoRevisions: (memoId: string) => request<ListMemoRevisionsResponse>(`/api/v1/memos/${memoId}/revisions`),
+    listMemoRevisions: (memoId: string) => request<ListMemoRevisionsResponse>(`/api/v1/memos/${encodeURIComponent(memoId)}/revisions`),
 
     restoreMemoRevision: (memoId: string, revisionId: string) =>
-      request<MemoResponse>(`/api/v1/memos/${memoId}/revisions/${revisionId}/restore`, {
+      request<MemoResponse>(`/api/v1/memos/${encodeURIComponent(memoId)}/revisions/${encodeURIComponent(revisionId)}/restore`, {
         method: "POST",
         body: JSON.stringify({}),
       }),
@@ -1710,7 +1714,7 @@ export const createEdgeEverClient = (options: EdgeEverClientOptions = {}) => {
         method: "DELETE",
       }),
 
-    getMarkdownExportPage: (offset = 0, limit = 50, memoIds?: string[]) => {
+    getMarkdownExportPage: (offset = 0, limit = 50, memoIds?: string[], cursor?: string) => {
       const search = new URLSearchParams({
         offset: String(offset),
         limit: String(limit),
@@ -1718,11 +1722,17 @@ export const createEdgeEverClient = (options: EdgeEverClientOptions = {}) => {
       if (memoIds && memoIds.length > 0) {
         search.set("ids", memoIds.join(","));
       }
+      if (offset > 0) search.set("includeTotal", "0");
+      if (cursor !== undefined) search.set("cursor", cursor);
       return request<MarkdownExportPage>(`/api/v1/exports/markdown?${search.toString()}`);
     },
 
-    getJsonBackupPage: (offset = 0, limit = 25) =>
-      request<JsonBackupPage>(`/api/v1/backups/json?offset=${offset}&limit=${limit}`),
+    getJsonBackupPage: (offset = 0, limit = 25, cursor?: string) => {
+      const search = new URLSearchParams({ offset: String(offset), limit: String(limit) });
+      if (offset > 0) search.set("includeTotal", "0");
+      if (cursor !== undefined) search.set("cursor", cursor);
+      return request<JsonBackupPage>(`/api/v1/backups/json?${search}`);
+    },
 
     restoreJsonNotebooks: (notebooks: JsonBackupNotebook[]) =>
       request<{ ok: true }>("/api/v1/restores/json/notebooks", {
@@ -1829,6 +1839,12 @@ export const createEdgeEverClient = (options: EdgeEverClientOptions = {}) => {
       }>;
     },
 
+    uploadPublishImage: (image: Blob) => request<{ url: string }>("/api/v1/publish-images", {
+      method: "POST",
+      headers: { "Content-Type": image.type },
+      body: image,
+    }),
+
     uploadMemoResource: (memoId: string, file: Blob | FormData) => {
       // Small files do not benefit from an upload session's three round trips.
       // Keep large attachments on the bounded-memory, resumable path.
@@ -1864,10 +1880,12 @@ export const createEdgeEverClient = (options: EdgeEverClientOptions = {}) => {
         contentJson?: TiptapDoc;
         contentMarkdown?: string;
         tags?: string[];
+        createdAt?: string;
+        updatedAt?: string;
         allowDestructiveOverwrite?: boolean;
       }
     ) =>
-      request<MemoResponse>(`/api/v1/memos/${memoId}`, {
+      request<MemoResponse>(`/api/v1/memos/${encodeURIComponent(memoId)}`, {
         method: "PATCH",
         body: JSON.stringify(payload),
       }),
@@ -1880,15 +1898,21 @@ export const createEdgeEverClient = (options: EdgeEverClientOptions = {}) => {
       }
 
       const suffix = search.toString() ? `?${search.toString()}` : "";
-      return request<{ ok: true }>(`/api/v1/memos/${memoId}${suffix}`, {
+      return request<{ ok: true }>(`/api/v1/memos/${encodeURIComponent(memoId)}${suffix}`, {
         method: "DELETE",
       });
     },
 
     restoreMemo: (memoId: string) =>
-      request<MemoResponse>(`/api/v1/memos/${memoId}/restore`, {
+      request<MemoResponse>(`/api/v1/memos/${encodeURIComponent(memoId)}/restore`, {
         method: "POST",
         body: JSON.stringify({}),
+      }),
+
+    duplicateMemo: (memoId: string, payload: { notebookId?: string; title?: string } = {}) =>
+      request<MemoResponse>(`/api/v1/memos/${encodeURIComponent(memoId)}/duplicate`, {
+        method: "POST",
+        body: JSON.stringify(payload),
       }),
 
     mergeMemos: (payload: { memoIds: string[]; notebookId?: string; title?: string }) =>

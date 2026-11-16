@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
+import { NEW_IMAGE_WIDTH_PERCENT } from "./image-display.ts";
 import {
   countMemoCharacters,
+  DEFAULT_MEMO_TITLE,
+  getMemoDisplayTitle,
   docToMarkdown,
   docToText,
   markdownToDoc,
@@ -133,6 +136,25 @@ describe("PDF attachment Markdown compatibility", () => {
 });
 
 describe("file attachment Markdown compatibility", () => {
+  test("keeps literal entities and escapes in attachment labels without changing resource URL suffixes", () => {
+    const url = "/api/v1/resources/res_label/blob?download=1&copy=2#page=3";
+    for (const [extension, type] of [["pdf", PDF_ATTACHMENT_NODE_TYPE], ["zip", FILE_ATTACHMENT_NODE_TYPE]]) {
+      const label = `literal &copy; &#91; \\[.${extension}`;
+      const doc = { type: "doc", content: [{ type: "paragraph", content: [{ type, attrs: { url, label } }] }] };
+      const reopened = markdownToDoc(docToMarkdown(doc)).content[0].content[0];
+      expect(reopened).toMatchObject({ type, attrs: { label, url } });
+    }
+  });
+
+  test("retains inline attachment labels containing an escaped opening bracket", () => {
+    for (const [extension, type] of [["pdf", PDF_ATTACHMENT_NODE_TYPE], ["zip", FILE_ATTACHMENT_NODE_TYPE]]) {
+      const markdown = `See [report\\[2026.${extension}](/api/v1/resources/res_bracket/blob)`;
+      const parsed = markdownToDoc(markdown);
+      expect(parsed.content[0].content.some(node => node.type === type)).toBe(true);
+      expect(markdownToDoc(docToMarkdown(parsed)).content[0].content.some(node => node.type === type)).toBe(true);
+    }
+  });
+
   test("parses a stored non-PDF resource link as an attachment card", () => {
     const markdown = "[Attachment: budget.xlsx](/api/v1/resources/res_sheet/blob)";
     const doc = markdownToDoc(markdown);
@@ -588,9 +610,9 @@ hello **world**
     expect(doc.content[0]?.type).toBe("details");
     expect(doc.content[0]?.content?.[1]?.content?.[0]).toMatchObject({
       type: "image",
-      attrs: { src: "https://example.com/a.png", alt: "pic", width: 50 },
+      attrs: { src: "https://example.com/a.png", alt: "pic", width: NEW_IMAGE_WIDTH_PERCENT },
     });
-    expect(docToMarkdown(doc)).toContain('<img src="https://example.com/a.png" alt="pic" width="50%" />');
+    expect(docToMarkdown(doc)).toContain(`<img src="https://example.com/a.png" alt="pic" width="${NEW_IMAGE_WIDTH_PERCENT}%" />`);
   });
 
   test("plays a remote video inside details through the existing attachment", () => {
@@ -810,5 +832,18 @@ describe("plugin embed Markdown compatibility", () => {
     expect(parsed.content[0]).toMatchObject({ type: PLUGIN_EMBED_NODE_TYPE, attrs: attributes });
     expect(docToMarkdown(parsed)).toBe(markdown);
     expect(resolveMemoContentDoc(parsed, "fallback").content[0].type).toBe(PLUGIN_EMBED_NODE_TYPE);
+  });
+});
+
+describe("getMemoDisplayTitle", () => {
+  test("shows the localized label for empty and default untitled titles", () => {
+    expect(getMemoDisplayTitle("", "Untitled note")).toBe("Untitled note");
+    expect(getMemoDisplayTitle(null, "Untitled note")).toBe("Untitled note");
+    expect(getMemoDisplayTitle(` ${DEFAULT_MEMO_TITLE} `, "Notatka bez tytułu")).toBe("Notatka bez tytułu");
+  });
+
+  test("keeps real titles, including Chinese ones", () => {
+    expect(getMemoDisplayTitle("  Plan  ", "Untitled note")).toBe("Plan");
+    expect(getMemoDisplayTitle("会议记录", "Untitled note")).toBe("会议记录");
   });
 });

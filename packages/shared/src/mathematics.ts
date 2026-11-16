@@ -2,12 +2,13 @@ import { InputRule, PasteRule } from "@tiptap/core";
 import { BlockMath, InlineMath } from "@tiptap/extension-mathematics";
 import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import { TextSelection, type Transaction } from "@tiptap/pm/state";
+// Registers \ce{...} and \pu{...} (chemical formulas, equations and units) on
+// the KaTeX instance the math nodes render with, on every client.
+import "katex/contrib/mhchem";
 import {
-  BLOCK_MATH_NODE_TYPE,
   edgeEverBlockMathMarkdownTokenizer,
   edgeEverInlineMathMarkdownTokenizer,
   findInlineMathSpans,
-  INLINE_MATH_NODE_TYPE,
   matchBlockMathText,
   matchInlineMathSuffix,
 } from "./mathematics-markdown";

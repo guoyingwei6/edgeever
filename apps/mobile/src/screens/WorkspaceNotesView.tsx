@@ -1,13 +1,13 @@
 import { memo, useRef, type ReactNode } from "react";
 import type { MemoFilterMode, MemoSortMode } from "@edgeever/client";
 import { DEFAULT_MEMO_TITLE, getMemoListTimestamp, getNotebookDescendantMemoCount, type MemoSummary, type Notebook } from "@edgeever/shared";
-import { MOBILE_UI_METRICS, toggleMobileMemoFilterMode } from "@edgeever/shared/mobile-ui";
+import { toggleMobileMemoFilterMode } from "@edgeever/shared/mobile-ui";
 import { FlatList, Platform, RefreshControl, useWindowDimensions, View } from "react-native";
 import { Gesture, GestureDetector, MouseButton, PointerType } from "react-native-gesture-handler";
 import { ActivityIndicator, Check, ChevronDown, ChevronLeft, LayoutTemplate, MoreHorizontal, Plus, RotateCcw, Search, Sparkles, Tag, X } from "../components/icons";
 import { Pressable, Text, TextInput } from "../components/LocalizedText";
 import type { MobileBootstrapProgress } from "../lib/local-mirror";
-import { useMobileLocale } from "../lib/mobile-locale";
+import { useMobileLocale, getMobileCatalog } from "../lib/mobile-locale";
 import { useMobileTheme } from "../lib/mobile-theme";
 import type { MobileMemoListDensity } from "../lib/preferences";
 import { formatMemoPreviewDate } from "./workspace-utils";
@@ -87,7 +87,7 @@ export const NotesView = ({
   selectedMemoIds: Set<string>;
 }) => {
   const { resolvedTheme } = useMobileTheme();
-  const { preference: localePreference, translate } = useMobileLocale();
+  const { translate } = useMobileLocale();
   const searchActive = searchText.trim().length > 0;
   const filterActive = memoFilterMode !== "all" || Boolean(selectedTag);
   // With sub-notebooks hidden, an empty parent must not look like its notes are gone.
@@ -235,7 +235,6 @@ const MemoList = ({
   emptyActions,
   emptyDescription,
   emptyTitle,
-  error,
   isError,
   initialSyncProgress,
   isLoading,
@@ -272,7 +271,7 @@ const MemoList = ({
   selectionMode?: boolean;
   selectedMemoIds?: Set<string>;
 }) => {
-  const { preference: localePreference, translate } = useMobileLocale();
+  const { translate } = useMobileLocale();
   const { width } = useWindowDimensions();
   const columnCount = width >= 1000 ? 3 : width >= 600 ? 2 : 1;
   const hasInitialSyncProgress = initialSyncProgress !== null;
@@ -446,8 +445,8 @@ const MemoCard = memo(function MemoCard({
   const listTimestamp = getMemoListTimestamp(memo, sortMode);
   const listTimestampLabel = formatMemoPreviewDate(listTimestamp.value, localePreference);
   const listTimestampKind = listTimestamp.field === "createdAt"
-    ? (resolvedLocale !== "zh-CN" ? "Created" : "创建")
-    : (resolvedLocale !== "zh-CN" ? "Updated" : "更新");
+    ? getMobileCatalog(resolvedLocale).mobile.notes.created
+    : getMobileCatalog(resolvedLocale).mobile.notes.updated;
   const handledLongPressRef = useRef(false);
   const rightClickGesture = Gesture.Tap()
     .mouseButton(MouseButton.RIGHT)
@@ -478,7 +477,7 @@ const MemoCard = memo(function MemoCard({
           </Pressable>
         ) : null}
         <Pressable
-          accessibilityHint={selectionMode ? undefined : (resolvedLocale !== "zh-CN" ? "Long press to select this note" : "长按选择这条笔记")}
+          accessibilityHint={selectionMode ? undefined : getMobileCatalog(resolvedLocale).mobile.notes.selectHint}
           accessibilityLabel={memoTitle}
           accessibilityRole="button"
           delayLongPress={520}
